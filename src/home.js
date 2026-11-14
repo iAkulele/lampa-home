@@ -4,7 +4,7 @@ import * as play from './play.js';
 import * as catalog from './catalog.js';
 import { ROWS } from './config.js';
 import { loadRow, todayIso, tvStatus } from './tmdb.js';
-import { toWideCard, applyBadge, pickBannerCard } from './cards.js';
+import { toWideCard, applyBadge, applyPosterClass, pickBannerCard } from './cards.js';
 import { BANNER, bannerVars, genreMap } from './templates.js';
 
 const NAME = 'lh_home';
@@ -119,6 +119,9 @@ function component(object) {
         onMore: () => catalog.openForRow(rowKey),
         onInstance(card, cardData) {
           card.use({
+            onCreate() {
+              applyPosterClass(card.render(true), cardData);
+            },
             onEnter: L.Router.call.bind(L.Router, 'full', cardData),
             onVisible() {
               // Fires when the card scrolls into view; the queue in tvStatus caps requests.

@@ -1,6 +1,45 @@
 (() => {
   // src/styles.css
-  var styles_default = `/* Home rows: wide 16:9 cards, five per row plus a peek of the sixth.
+  var styles_default = `/* Netflix-like theme: dark canvas, red accent. Everything is scoped to our screens. */
+.lh-home,
+.lh-catalog {
+  background: #141414;
+}
+.lh-home .items-line__title {
+  font-size: 1.6em;
+  font-weight: 700;
+}
+.lh-home .card--wide,
+.lh-catalog .card--wide {
+  transition: transform 0.2s;
+}
+.lh-home .card--wide.focus,
+.lh-catalog .card--wide.focus {
+  transform: scale(1.06);
+  z-index: 3;
+}
+.lh-home .card--wide.focus .card__view::after,
+.lh-catalog .card--wide.focus .card__view::after {
+  border-color: #fff;
+}
+.lh-home .card--wide .card__promo,
+.lh-catalog .card--wide .card__promo {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 100%);
+}
+.lh-home .card__view .time-line > div {
+  background-color: #e50914;
+}
+/* Poster used as backdrop: show it whole on a dark field instead of stretching. */
+.lh-home .card--wide.lh-card--poster .card__view,
+.lh-catalog .card--wide.lh-card--poster .card__view {
+  background: #0b0b0b;
+}
+.lh-home .card--wide.lh-card--poster .card__img,
+.lh-catalog .card--wide.lh-card--poster .card__img {
+  object-fit: contain;
+}
+
+/* Home rows: wide 16:9 cards, five per row plus a peek of the sixth.
    Lampa sets body font-size = innerWidth / 84.17, so the layout is width-independent:
    1.5em left offset + 5.5 x (14em card + 1em gap) ~= 84em. */
 .lh-home .card--wide {
@@ -694,6 +733,10 @@
   function badgeText(status) {
     return `${status.aired} \u0438\u0437 ${status.total}`;
   }
+  function applyPosterClass(cardEl, cardData) {
+    if (!cardEl || !cardData || !cardData.lh_poster_fallback) return;
+    cardEl.classList.add("lh-card--poster");
+  }
   function applyBadge(cardEl, status) {
     if (!cardEl || !status || !status.total) return;
     const view = cardEl.querySelector(".card__view");
@@ -1234,6 +1277,9 @@
       },
       onInstance(item, data) {
         item.use({
+          onCreate() {
+            applyPosterClass(item.render(true), data);
+          },
           onEnter: L.Router.call.bind(L.Router, "full", data),
           onFocus() {
             L.Background.change(L.Utils.cardImgBackground(data));
@@ -1417,6 +1463,9 @@
           onMore: () => openForRow(rowKey),
           onInstance(card, cardData) {
             card.use({
+              onCreate() {
+                applyPosterClass(card.render(true), cardData);
+              },
               onEnter: L.Router.call.bind(L.Router, "full", cardData),
               onVisible() {
                 if (this.lhBadged || !wantsBadge(rowKey, cardData)) return;

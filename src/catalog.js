@@ -2,7 +2,7 @@
 // cartoon / anime) with genre, year and sort chips above it.
 import { lampa, tmdbGet, store } from './lampa.js';
 import { catalogQuery, genresFor } from './tmdb-queries.js';
-import { toWideCard } from './cards.js';
+import { toWideCard, applyPosterClass } from './cards.js';
 import { todayIso } from './tmdb.js';
 
 const NAME = 'lh_catalog';
@@ -215,6 +215,9 @@ function component(object) {
     },
     onInstance(item, data) {
       item.use({
+        onCreate() {
+          applyPosterClass(item.render(true), data);
+        },
         onEnter: L.Router.call.bind(L.Router, 'full', data),
         onFocus() {
           L.Background.change(L.Utils.cardImgBackground(data));

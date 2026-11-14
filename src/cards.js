@@ -28,6 +28,12 @@ export function badgeText(status) {
   return `${status.aired} из ${status.total}`;
 }
 
+// Marks a poster-fallback card element so CSS can fit the poster instead of cropping it.
+export function applyPosterClass(cardEl, cardData) {
+  if (!cardEl || !cardData || !cardData.lh_poster_fallback) return;
+  cardEl.classList.add('lh-card--poster');
+}
+
 // Adds the "N из M" badge to a card element once; skipped without usable status.
 export function applyBadge(cardEl, status) {
   if (!cardEl || !status || !status.total) return;

@@ -49,3 +49,14 @@ test('test_pick_banner_random_within_first_five', async () => {
   assert.strictEqual(pickBannerCard(cards, true, () => 0.999).id, 5);
   assert.strictEqual(pickBannerCard(cards.slice(0, 2), true, () => 0.999).id, 2);
 });
+
+test('test_apply_poster_class_marks_only_fallback_cards', async () => {
+  const { applyPosterClass } = await import('../src/cards.js');
+  const mk = () => ({ classList: { added: [], add(c) { this.added.push(c); } } });
+  const a = mk();
+  applyPosterClass(a, { lh_poster_fallback: true });
+  assert.deepStrictEqual(a.classList.added, ['lh-card--poster']);
+  const b = mk();
+  applyPosterClass(b, {});
+  assert.deepStrictEqual(b.classList.added, []);
+});
