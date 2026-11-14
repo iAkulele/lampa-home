@@ -143,12 +143,16 @@ export function catalogQuery(kind, filters, page, today) {
   if (kind === 'anime') f.with_origin_country = 'JP';
 
   const dateField = isTv ? 'first_air_date' : 'primary_release_date';
+  // Movies: only titles with a US digital release, the same rule as the home rows.
+  if (!isTv) Object.assign(f, movieFilter(today));
   if (filters.sort === 'rating') {
     params.sort_by = 'vote_average.desc';
     f['vote_count.gte'] = '100';
   } else {
     params.sort_by = `${dateField}.desc`;
     f[`${dateField}.lte`] = today;
+    // A small vote floor drops obscure festival and stub entries from "new".
+    f['vote_count.gte'] = isTv ? '5' : '10';
   }
   const range = yearRange(filters.year);
   if (range) {

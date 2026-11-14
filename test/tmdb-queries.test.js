@@ -125,3 +125,29 @@ test('test_catalog_tv_year_range_uses_first_air_date', () => {
   assert.strictEqual(q.params.filter['first_air_date.lte'], '2009-12-31');
   assert.ok(!('first_air_date_year' in q.params.filter));
 });
+
+test('test_catalog_movie_new_has_digital_filter_and_votes', () => {
+  for (const kind of ['movie', 'cartoon']) {
+    const f = catalogQuery(kind, { genre: null, year: null, sort: 'new' }, 1, TODAY).params.filter;
+    assert.strictEqual(f.with_release_type, '4');
+    assert.strictEqual(f.region, 'US');
+    assert.strictEqual(f['primary_release_date.lte'], TODAY);
+    assert.strictEqual(f['vote_count.gte'], '10');
+  }
+  // rating sort keeps the digital filter and its own vote floor
+  const r = catalogQuery('movie', { genre: null, year: null, sort: 'rating' }, 1, TODAY).params.filter;
+  assert.strictEqual(r.with_release_type, '4');
+  assert.strictEqual(r.region, 'US');
+  assert.strictEqual(r['primary_release_date.lte'], TODAY);
+  assert.strictEqual(r['vote_count.gte'], '100');
+});
+
+test('test_catalog_tv_new_has_votes_and_date_cap', () => {
+  for (const kind of ['tv', 'anime']) {
+    const q = catalogQuery(kind, { genre: null, year: null, sort: 'new' }, 1, TODAY);
+    assert.strictEqual(q.params.sort_by, 'first_air_date.desc');
+    assert.strictEqual(q.params.filter['first_air_date.lte'], TODAY);
+    assert.strictEqual(q.params.filter['vote_count.gte'], '5');
+    assert.ok(!('with_release_type' in q.params.filter));
+  }
+});
