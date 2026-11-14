@@ -210,7 +210,7 @@
 `;
 
   // src/config.js
-  var ROWS = ["movies", "horror", "anime", "series", "cartoons", "history"];
+  var ROWS = ["movies", "horror", "anime", "series", "cartoons", "russian", "history"];
   var STORAGE_KEYS = {
     progress: "lh_progress",
     seen: "lh_seen",
@@ -722,6 +722,19 @@
             filter: { ...movieFilter(today), "vote_count.gte": "20" }
           }
         };
+      case "russian":
+        return {
+          url: "discover/movie",
+          params: {
+            orig_lang: "ru",
+            sort_by: `${MOVIE_DATE}.desc`,
+            filter: {
+              [`${MOVIE_DATE}.lte`]: today,
+              without_genres: String(GENRE_DOCUMENTARY),
+              "vote_count.gte": "10"
+            }
+          }
+        };
       default:
         return null;
     }
@@ -748,7 +761,8 @@
       f.without_genres = `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`;
     }
     const dateField = isTv ? "first_air_date" : MOVIE_DATE;
-    if (!isTv) Object.assign(f, movieFilter(today));
+    if (!isTv && filters.lang === "ru") f.with_original_language = "ru";
+    else if (!isTv) Object.assign(f, movieFilter(today));
     if (filters.sort === "rating") {
       params.sort_by = "vote_average.desc";
       f["vote_count.gte"] = "100";
@@ -774,6 +788,7 @@
     anime: "\u0410\u043D\u0438\u043C\u0435: \u043E\u043D\u0433\u043E\u0438\u043D\u0433\u0438",
     series: "\u041D\u043E\u0432\u044B\u0435 \u0441\u0435\u0440\u0438\u0430\u043B\u044B",
     cartoons: "\u041D\u043E\u0432\u044B\u0435 \u043C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B",
+    russian: "\u0420\u0443\u0441\u0441\u043A\u043E\u0435",
     history: "\u041D\u0435\u0434\u0430\u0432\u043D\u043E \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D\u043D\u043E\u0435"
   };
   function rowTitle(rowKey) {
@@ -1312,13 +1327,14 @@
   var DECADES = ["2000-2009", "1990-1999"];
   var KIND_TITLES = { movie: "\u0424\u0438\u043B\u044C\u043C\u044B", tv: "\u0421\u0435\u0440\u0438\u0430\u043B\u044B", cartoon: "\u041C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B", anime: "\u0410\u043D\u0438\u043C\u0435" };
   var SORT_TITLES = { new: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u043E\u0432\u044B\u0435", rating: "\u041F\u043E \u0440\u0435\u0439\u0442\u0438\u043D\u0433\u0443" };
-  var FRESH = { genre: null, year: null, sort: "new" };
+  var FRESH = { genre: null, year: null, sort: "new", lang: null };
   var ROW_PRESETS = {
     movies: { kind: "movie", preset: FRESH },
     horror: { kind: "movie", preset: { ...FRESH, genre: 27 } },
     anime: { kind: "anime", preset: FRESH },
     series: { kind: "tv", preset: FRESH },
-    cartoons: { kind: "cartoon", preset: FRESH }
+    cartoons: { kind: "cartoon", preset: FRESH },
+    russian: { kind: "movie", preset: { ...FRESH, lang: "ru" } }
   };
   function presetFor(rowKey) {
     const p = ROW_PRESETS[rowKey];
@@ -1390,7 +1406,7 @@
     const kind = object.kind;
     object.params = { ...object.params || {}, items: { mapping: "grid", cols: COLS } };
     const comp = L.Maker.make("Category", object, (m) => m.toggle(m.MASK.base, "Pagination"));
-    const f = store.filters.get(kind);
+    const f = { ...store.filters.get(kind), lang: object.lang || null };
     const filter = new L.Filter(object);
     const head = document.createElement("div");
     head.className = "lh-catalog__head";
@@ -1513,7 +1529,9 @@
   }
   function open(kind, preset) {
     if (preset) store.filters.set(kind, applyPreset(store.filters.get(kind), preset));
-    lampa().Activity.push({ url: "", component: NAME, kind, title: KIND_TITLES[kind], page: 1, source: "tmdb" });
+    const lang = preset && preset.lang || null;
+    const title = lang === "ru" ? "\u0420\u0443\u0441\u0441\u043A\u043E\u0435" : KIND_TITLES[kind];
+    lampa().Activity.push({ url: "", component: NAME, kind, lang, title, page: 1, source: "tmdb" });
   }
   function openHistory() {
     const L = lampa();

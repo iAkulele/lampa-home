@@ -6,6 +6,7 @@ const ROW_TITLES = {
   anime: 'Аниме: онгоинги',
   series: 'Новые сериалы',
   cartoons: 'Новые мультфильмы',
+  russian: 'Русское',
   history: 'Недавно просмотренное',
 };
 

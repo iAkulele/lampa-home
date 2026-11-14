@@ -18,13 +18,14 @@ const SORT_TITLES = { new: 'Сначала новые', rating: 'По рейти
 
 // Home row -> catalog kind and the filters it opens with. history has no catalog.
 // The rows are "new" lists, so their catalogs always open on sort 'new' with no year.
-const FRESH = { genre: null, year: null, sort: 'new' };
+const FRESH = { genre: null, year: null, sort: 'new', lang: null };
 const ROW_PRESETS = {
   movies: { kind: 'movie', preset: FRESH },
   horror: { kind: 'movie', preset: { ...FRESH, genre: 27 } },
   anime: { kind: 'anime', preset: FRESH },
   series: { kind: 'tv', preset: FRESH },
   cartoons: { kind: 'cartoon', preset: FRESH },
+  russian: { kind: 'movie', preset: { ...FRESH, lang: 'ru' } },
 };
 
 export function presetFor(rowKey) {
@@ -116,7 +117,8 @@ function component(object) {
   object.params = { ...(object.params || {}), items: { mapping: 'grid', cols: COLS } };
 
   const comp = L.Maker.make('Category', object, (m) => m.toggle(m.MASK.base, 'Pagination'));
-  const f = store.filters.get(kind);
+  // lang is not persisted: it lives in the activity, so the menu's Фильмы is unaffected.
+  const f = { ...store.filters.get(kind), lang: object.lang || null };
   const filter = new L.Filter(object);
   const head = document.createElement('div');
   head.className = 'lh-catalog__head';
@@ -254,7 +256,9 @@ export function register() {
 // Preset filters are merged over the stored ones and saved, so they stick.
 export function open(kind, preset) {
   if (preset) store.filters.set(kind, applyPreset(store.filters.get(kind), preset));
-  lampa().Activity.push({ url: '', component: NAME, kind, title: KIND_TITLES[kind], page: 1, source: 'tmdb' });
+  const lang = (preset && preset.lang) || null;
+  const title = lang === 'ru' ? 'Русское' : KIND_TITLES[kind];
+  lampa().Activity.push({ url: '', component: NAME, kind, lang, title, page: 1, source: 'tmdb' });
 }
 
 function openHistory() {

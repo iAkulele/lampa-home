@@ -1,5 +1,5 @@
 // Row keys in the order defined by the spec.
-export const ROWS = ['movies', 'horror', 'anime', 'series', 'cartoons', 'history'];
+export const ROWS = ['movies', 'horror', 'anime', 'series', 'cartoons', 'russian', 'history'];
 
 export const STORAGE_KEYS = {
   progress: 'lh_progress',

@@ -11,9 +11,16 @@ import {
   KIND_TITLES,
 } from '../src/catalog.js';
 
+test('test_preset_for_russian', () => {
+  assert.deepStrictEqual(presetFor('russian'), {
+    kind: 'movie',
+    preset: { genre: null, year: null, sort: 'new', lang: 'ru' },
+  });
+});
+
 test('test_preset_for_rows', () => {
   // Rows are "new" lists: their catalogs open on sort 'new' with no year.
-  const fresh = { genre: null, year: null, sort: 'new' };
+  const fresh = { genre: null, year: null, sort: 'new', lang: null };
   assert.deepStrictEqual(presetFor('movies'), { kind: 'movie', preset: fresh });
   assert.deepStrictEqual(presetFor('horror'), { kind: 'movie', preset: { ...fresh, genre: 27 } });
   assert.deepStrictEqual(presetFor('anime'), { kind: 'anime', preset: fresh });
@@ -63,7 +70,7 @@ test('test_kind_titles', () => {
 
 test('test_horror_preset_overrides_stored_sort_and_year', () => {
   const stored = { genre: 35, year: 2020, sort: 'rating' };
-  assert.deepStrictEqual(applyPreset(stored, presetFor('horror').preset), { genre: 27, year: null, sort: 'new' });
+  assert.deepStrictEqual(applyPreset(stored, presetFor('horror').preset), { genre: 27, year: null, sort: 'new', lang: null });
 });
 
 test('test_guarded_drops_calls_after_destroy', () => {

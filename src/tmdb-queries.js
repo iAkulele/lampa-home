@@ -125,6 +125,20 @@ export function rowQuery(rowKey, today) {
           filter: { ...movieFilter(today), 'vote_count.gte': '20' },
         },
       };
+    case 'russian':
+      // Russian films release in Russia, not in the US digital window: no movieFilter.
+      return {
+        url: 'discover/movie',
+        params: {
+          orig_lang: 'ru',
+          sort_by: `${MOVIE_DATE}.desc`,
+          filter: {
+            [`${MOVIE_DATE}.lte`]: today,
+            without_genres: String(GENRE_DOCUMENTARY),
+            'vote_count.gte': '10',
+          },
+        },
+      };
     default:
       return null;
   }
@@ -137,7 +151,7 @@ export function yearRange(year) {
 }
 
 // kind: 'movie' | 'tv' | 'cartoon' | 'anime'
-// filters: { genre: number|'horror'|null, year: number|'YYYY-YYYY'|null, sort: 'new'|'rating' }
+// filters: { genre: number|'horror'|null, year: number|'YYYY-YYYY'|null, sort: 'new'|'rating', lang?: 'ru'|null }
 // For 'anime' and 'cartoon' genre 16 is always applied; a chosen genre is ANDed with it.
 export function catalogQuery(kind, filters, page, today) {
   const isTv = kind === 'tv' || kind === 'anime';
@@ -163,7 +177,9 @@ export function catalogQuery(kind, filters, page, today) {
 
   const dateField = isTv ? 'first_air_date' : MOVIE_DATE;
   // Movies: only titles with a US digital release, the same rule as the home rows.
-  if (!isTv) Object.assign(f, movieFilter(today));
+  // lang 'ru': Russian originals, which release in Russia: no US digital filter.
+  if (!isTv && filters.lang === 'ru') f.with_original_language = 'ru';
+  else if (!isTv) Object.assign(f, movieFilter(today));
   if (filters.sort === 'rating') {
     params.sort_by = 'vote_average.desc';
     f['vote_count.gte'] = '100';

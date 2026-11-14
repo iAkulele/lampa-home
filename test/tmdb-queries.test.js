@@ -187,3 +187,26 @@ test('test_tv_rows_skip_announced_episodes', () => {
     assert.strictEqual(rowQuery(row, TODAY).params.filter['air_date.lte'], TODAY, row);
   }
 });
+
+test('test_russian_row_is_ru_language_movies', () => {
+  const q = rowQuery('russian', TODAY);
+  assert.strictEqual(q.url, 'discover/movie');
+  assert.strictEqual(q.params.orig_lang, 'ru');
+  assert.strictEqual(q.params.sort_by, 'release_date.desc');
+  assert.strictEqual(q.params.filter['release_date.lte'], TODAY);
+  assert.strictEqual(q.params.filter['vote_count.gte'], '10');
+  assert.strictEqual(q.params.filter.without_genres, '99');
+  assert.ok(!('with_release_type' in q.params.filter));
+  assert.ok(!('region' in q.params.filter));
+});
+
+test('test_catalog_movie_lang_ru', () => {
+  const q = catalogQuery('movie', { genre: null, year: null, sort: 'new', lang: 'ru' }, 1, TODAY);
+  assert.strictEqual(q.params.filter.with_original_language, 'ru');
+  assert.ok(!('with_release_type' in q.params.filter));
+  assert.ok(!('region' in q.params.filter));
+  assert.strictEqual(q.params.filter['release_date.lte'], TODAY);
+  const n = catalogQuery('movie', { genre: null, year: null, sort: 'new', lang: null }, 1, TODAY);
+  assert.strictEqual(n.params.filter.with_release_type, '4');
+  assert.ok(!('with_original_language' in n.params.filter));
+});
