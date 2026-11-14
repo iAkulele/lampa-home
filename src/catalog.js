@@ -87,12 +87,25 @@ const canMove = (dir) => {
 };
 const move = (dir) => nav().move(dir);
 
-function load(kind, f, page, seen, ok, fail) {
+const EXTRA_PAGES = 3;
+
+// A page that filters down to nothing must not end the list: try the next pages
+// (bounded) and keep object.page in step so Lampa's pagination continues from there.
+function load(object, kind, f, page, seen, ok, fail, extra = EXTRA_PAGES) {
   const q = catalogQuery(kind, f, page, todayIso());
   tmdbGet(
     q.url,
     q.params,
-    (json) => ok({ ...json, results: dedupe(((json && json.results) || []).filter(hasRussianTitle), seen).map(toWideCard) }),
+    (json) => {
+      const results = dedupe(((json && json.results) || []).filter(hasRussianTitle), seen).map(toWideCard);
+      const total = (json && json.total_pages) || 1;
+      if (!results.length && extra > 0 && page < total) {
+        object.page = page + 1;
+        load(object, kind, f, page + 1, seen, ok, fail, extra - 1);
+        return;
+      }
+      ok({ ...json, results });
+    },
     fail,
   );
 }
@@ -191,10 +204,10 @@ function component(object) {
       buildFilter();
       this.render(true).prepend(head);
       this.scroll.minus(head);
-      load(kind, f, 1, seen, guarded(this, this.build.bind(this)), guarded(this, this.empty.bind(this)));
+      load(object, kind, f, 1, seen, guarded(this, this.build.bind(this)), guarded(this, this.empty.bind(this)));
     },
     onNext(resolve, reject) {
-      load(kind, f, object.page, seen, guarded(this, resolve.bind(this)), guarded(this, reject.bind(this)));
+      load(object, kind, f, object.page, seen, guarded(this, resolve.bind(this)), guarded(this, reject.bind(this)));
     },
     onController(controller) {
       controller.up = () => {

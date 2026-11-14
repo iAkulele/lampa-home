@@ -78,14 +78,36 @@ test('test_has_russian_title_rejects_latin_only', () => {
 
 test('test_fill_pages_stops_when_enough', async () => {
   const calls = [];
-  const res = await fillPages(async (p) => { calls.push(p); return Array(7).fill(p); });
+  const res = await fillPages(async (p) => { calls.push(p); return { cards: Array(7).fill(p), done: false }; });
   assert.deepStrictEqual(calls, [1, 2]);
   assert.strictEqual(res.length, 14);
 });
 
 test('test_fill_pages_stops_at_max_pages', async () => {
   const calls = [];
-  const res = await fillPages(async (p) => { calls.push(p); return [p]; });
+  const res = await fillPages(async (p) => { calls.push(p); return { cards: [p], done: false }; });
   assert.deepStrictEqual(calls, [1, 2, 3]);
   assert.strictEqual(res.length, 3);
+});
+
+test('test_fill_pages_keeps_page1_when_page2_fails', async () => {
+  const res = await fillPages(async (p) => {
+    if (p === 2) throw new Error('net');
+    return { cards: [1, 2, 3], done: false };
+  });
+  assert.deepStrictEqual(res, [1, 2, 3]);
+  await assert.rejects(fillPages(async () => { throw new Error('x'); }));
+});
+
+test('test_fill_pages_continues_past_empty_filtered_page', async () => {
+  const calls = [];
+  const res = await fillPages(async (p) => { calls.push(p); return { cards: p === 2 ? [] : Array(6).fill(p), done: false }; });
+  assert.deepStrictEqual(calls, [1, 2, 3]);
+  assert.strictEqual(res.length, 12);
+});
+
+test('test_fill_pages_stops_when_done', async () => {
+  const calls = [];
+  await fillPages(async (p) => { calls.push(p); return { cards: [p], done: true }; });
+  assert.deepStrictEqual(calls, [1]);
 });

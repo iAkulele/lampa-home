@@ -19,17 +19,24 @@ export function hasRussianTitle(card) {
   return /[Ѐ-ӿ]/.test(card.title || card.name || '') || card.original_language === 'ru';
 }
 
-// Fetches pages 1..maxPages until at least `min` cards are collected; returns up to `limit`.
-// fetchPage(page) -> Promise<card[]> (an empty array means no more pages).
+// Fetches pages 1..maxPages until at least `min` cards are collected or the source is
+// exhausted; returns up to `limit`. fetchPage(page) -> Promise<{cards, done}>.
+// A page-1 failure rejects; a failure on a later page keeps what was already collected.
 export async function fillPages(fetchPage, { min = 12, maxPages = 3, limit = 20 } = {}) {
   let all = [];
   for (let page = 1; page <= maxPages; page++) {
-    const part = await fetchPage(page);
-    if (!part || !part.length) {
-      if (page > 1) break;
+    let part;
+    if (page === 1) {
+      part = await fetchPage(page);
+    } else {
+      try {
+        part = await fetchPage(page);
+      } catch (e) {
+        break;
+      }
     }
-    all = all.concat(part || []);
-    if (all.length >= min) break;
+    all = all.concat(part.cards || []);
+    if (all.length >= min || part.done) break;
   }
   return all.slice(0, limit);
 }

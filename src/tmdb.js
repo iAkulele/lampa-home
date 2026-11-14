@@ -34,13 +34,10 @@ export function loadRow(rowKey, today = todayIso()) {
   const q = rowQuery(rowKey, today);
   if (!q) return Promise.resolve(base);
   let totalPages = 1;
-  const fetchPage = (page) => {
-    if (page > totalPages) return Promise.resolve([]);
-    return get(q.url, { ...q.params, page }).then((json) => {
-      if (page === 1) totalPages = (json && json.total_pages) || 1;
-      return ((json && json.results) || []).filter(hasRussianTitle);
-    });
-  };
+  const fetchPage = (page) => get(q.url, { ...q.params, page }).then((json) => {
+    if (page === 1) totalPages = (json && json.total_pages) || 1;
+    return { cards: ((json && json.results) || []).filter(hasRussianTitle), done: page >= totalPages };
+  });
   return fillPages(fetchPage).then(
     (results) => ({ ...base, results, total_pages: totalPages }),
     () => base,

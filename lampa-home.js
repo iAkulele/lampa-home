@@ -736,12 +736,18 @@
   async function fillPages(fetchPage, { min = 12, maxPages = 3, limit = 20 } = {}) {
     let all = [];
     for (let page = 1; page <= maxPages; page++) {
-      const part = await fetchPage(page);
-      if (!part || !part.length) {
-        if (page > 1) break;
+      let part;
+      if (page === 1) {
+        part = await fetchPage(page);
+      } else {
+        try {
+          part = await fetchPage(page);
+        } catch (e) {
+          break;
+        }
       }
-      all = all.concat(part || []);
-      if (all.length >= min) break;
+      all = all.concat(part.cards || []);
+      if (all.length >= min || part.done) break;
     }
     return all.slice(0, limit);
   }
@@ -799,13 +805,10 @@
     const q = rowQuery(rowKey, today);
     if (!q) return Promise.resolve(base);
     let totalPages = 1;
-    const fetchPage = (page) => {
-      if (page > totalPages) return Promise.resolve([]);
-      return get(q.url, { ...q.params, page }).then((json) => {
-        if (page === 1) totalPages = json && json.total_pages || 1;
-        return (json && json.results || []).filter(hasRussianTitle);
-      });
-    };
+    const fetchPage = (page) => get(q.url, { ...q.params, page }).then((json) => {
+      if (page === 1) totalPages = json && json.total_pages || 1;
+      return { cards: (json && json.results || []).filter(hasRussianTitle), done: page >= totalPages };
+    });
     return fillPages(fetchPage).then(
       (results) => ({ ...base, results, total_pages: totalPages }),
       () => base
@@ -1193,12 +1196,22 @@
     return !!(n && n.canmove(dir));
   };
   var move = (dir) => nav().move(dir);
-  function load(kind, f, page, seen, ok, fail2) {
+  var EXTRA_PAGES = 3;
+  function load(object, kind, f, page, seen, ok, fail2, extra = EXTRA_PAGES) {
     const q = catalogQuery(kind, f, page, todayIso());
     tmdbGet(
       q.url,
       q.params,
-      (json) => ok({ ...json, results: dedupe((json && json.results || []).filter(hasRussianTitle), seen).map(toWideCard) }),
+      (json) => {
+        const results = dedupe((json && json.results || []).filter(hasRussianTitle), seen).map(toWideCard);
+        const total = json && json.total_pages || 1;
+        if (!results.length && extra > 0 && page < total) {
+          object.page = page + 1;
+          load(object, kind, f, page + 1, seen, ok, fail2, extra - 1);
+          return;
+        }
+        ok({ ...json, results });
+      },
       fail2
     );
   }
@@ -1285,10 +1298,10 @@
         buildFilter();
         this.render(true).prepend(head);
         this.scroll.minus(head);
-        load(kind, f, 1, seen, guarded(this, this.build.bind(this)), guarded(this, this.empty.bind(this)));
+        load(object, kind, f, 1, seen, guarded(this, this.build.bind(this)), guarded(this, this.empty.bind(this)));
       },
       onNext(resolve, reject) {
-        load(kind, f, object.page, seen, guarded(this, resolve.bind(this)), guarded(this, reject.bind(this)));
+        load(object, kind, f, object.page, seen, guarded(this, resolve.bind(this)), guarded(this, reject.bind(this)));
       },
       onController(controller) {
         controller.up = () => {
