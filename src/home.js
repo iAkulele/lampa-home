@@ -1,5 +1,6 @@
 // Home screen component `lh_home`: six rows of wide cards instead of Lampa's main page.
 import { lampa, noty } from './lampa.js';
+import * as catalog from './catalog.js';
 import { ROWS } from './config.js';
 import { loadRow, todayIso, tvStatus } from './tmdb.js';
 import { toWideCard, applyBadge } from './cards.js';
@@ -14,11 +15,6 @@ const MARKER = 'lh_home_live';
 export function wantsBadge(rowKey, cardData) {
   if (rowKey === 'anime' || rowKey === 'series') return true;
   return rowKey === 'history' && !!cardData.original_name;
-}
-
-// Until the catalog (Task 9) exists, "more" only announces it.
-function openCatalog(rowKey) {
-  noty('Каталог: скоро');
 }
 
 // Source card of the banner: first card of the movies row, else of the first row.
@@ -119,7 +115,7 @@ function component(object) {
     onInstance(item, data) {
       const rowKey = data.params && data.params.lh_row;
       item.use({
-        onMore: () => openCatalog(rowKey),
+        onMore: () => catalog.openForRow(rowKey),
         onInstance(card, cardData) {
           card.use({
             onEnter: L.Router.call.bind(L.Router, 'full', cardData),

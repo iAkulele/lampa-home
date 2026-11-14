@@ -5,6 +5,7 @@ import {
   catalogQuery,
   genresFor,
   daysAgo,
+  yearRange,
   GENRE_HORROR_TV_KEYWORDS,
 } from '../src/tmdb-queries.js';
 
@@ -102,4 +103,25 @@ test('test_genres_for_anime_excludes_animation', () => {
   assert.ok(genresFor('anime').length > 0);
   assert.ok(!genresFor('anime').some((g) => g.id === 16));
   assert.ok(!genresFor('cartoon').some((g) => g.id === 16));
+});
+
+test('test_year_range_maps_decade_string_to_dates', () => {
+  assert.deepStrictEqual(yearRange('2000-2009'), { from: '2000-01-01', to: '2009-12-31' });
+  assert.strictEqual(yearRange(2024), null);
+  assert.strictEqual(yearRange(null), null);
+  assert.strictEqual(yearRange('junk'), null);
+});
+
+test('test_catalog_year_range_uses_date_bounds', () => {
+  const q = catalogQuery('movie', { genre: null, year: '1990-1999', sort: 'new' }, 1, TODAY);
+  assert.strictEqual(q.params.filter['primary_release_date.gte'], '1990-01-01');
+  assert.strictEqual(q.params.filter['primary_release_date.lte'], '1999-12-31');
+  assert.ok(!('primary_release_year' in q.params.filter));
+});
+
+test('test_catalog_tv_year_range_uses_first_air_date', () => {
+  const q = catalogQuery('tv', { genre: null, year: '2000-2009', sort: 'rating' }, 1, TODAY);
+  assert.strictEqual(q.params.filter['first_air_date.gte'], '2000-01-01');
+  assert.strictEqual(q.params.filter['first_air_date.lte'], '2009-12-31');
+  assert.ok(!('first_air_date_year' in q.params.filter));
 });

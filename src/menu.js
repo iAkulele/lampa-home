@@ -1,6 +1,10 @@
-// Hijacks Lampa's "main" menu item and start page so they open `lh_home`.
+// Hijacks Lampa's "main" menu item and start page so they open `lh_home`, and
+// the movie / tv / cartoon / anime items so they open `lh_catalog`.
 import { lampa } from './lampa.js';
 import * as home from './home.js';
+import * as catalog from './catalog.js';
+
+const CATALOG_ACTIONS = ['movie', 'tv', 'cartoon', 'anime'];
 
 // True when the activity must be swapped for a live lh_home: it is Lampa's native
 // main page, or an lh_home restored by start_page='last' before the plugin
@@ -32,9 +36,13 @@ export function init() {
   const L = lampa();
 
   L.Listener.follow('menu', (e) => {
-    if (e.type === 'action' && e.action === 'main') {
+    if (e.type !== 'action') return;
+    if (e.action === 'main') {
       e.abort();
       home.open();
+    } else if (CATALOG_ACTIONS.includes(e.action)) {
+      e.abort();
+      catalog.open(e.action);
     }
   });
 

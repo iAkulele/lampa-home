@@ -105,3 +105,27 @@
   border-radius: 0.2em;
   z-index: 2;
 }
+
+/* Catalog: chips row above a 4-column grid of the same wide 16:9 cards. */
+.lh-catalog .lh-catalog__head {
+  padding: 1em 1.5em 0 1.5em;
+}
+.lh-catalog .lh-catalog__head .scroll--nopadding .scroll__body {
+  padding: 0;
+}
+.lh-catalog .card--wide .card__view {
+  padding-bottom: 56.25%;
+}
+.lh-catalog .card--wide .card__img {
+  object-fit: cover;
+}
+.lh-catalog .card--wide .card__promo {
+  padding: 1.5em 0.8em 0.7em 0.8em;
+}
+.lh-catalog .card--wide .card__promo-title {
+  font-size: 1.3em;
+  padding-right: 2.6em;
+}
+.lh-catalog .card--wide .card__promo-text {
+  display: none;
+}

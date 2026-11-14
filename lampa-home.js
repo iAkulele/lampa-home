@@ -107,6 +107,30 @@
   border-radius: 0.2em;
   z-index: 2;
 }
+
+/* Catalog: chips row above a 4-column grid of the same wide 16:9 cards. */
+.lh-catalog .lh-catalog__head {
+  padding: 1em 1.5em 0 1.5em;
+}
+.lh-catalog .lh-catalog__head .scroll--nopadding .scroll__body {
+  padding: 0;
+}
+.lh-catalog .card--wide .card__view {
+  padding-bottom: 56.25%;
+}
+.lh-catalog .card--wide .card__img {
+  object-fit: cover;
+}
+.lh-catalog .card--wide .card__promo {
+  padding: 1.5em 0.8em 0.7em 0.8em;
+}
+.lh-catalog .card--wide .card__promo-title {
+  font-size: 1.3em;
+  padding-right: 2.6em;
+}
+.lh-catalog .card--wide .card__promo-text {
+  display: none;
+}
 `;
 
   // src/config.js
@@ -236,48 +260,42 @@
   var lampa = () => window.Lampa;
   var store = createStore(storage);
 
-  // src/episodes.js
-  var realSeasons = (seasons) => (seasons || []).filter((s) => s && s.season_number > 0).sort((a, b) => a.season_number - b.season_number);
-  var findSeason = (seasons, n) => realSeasons(seasons).find((s) => s.season_number === n);
-  function episodeStatus(tv, today) {
-    const list = realSeasons(tv && tv.seasons);
-    const last = tv && tv.last_episode_to_air;
-    const airing = !!tv && (tv.status === "Returning Series" || !!tv.next_episode_to_air);
-    if (!last) {
-      const s = list[list.length - 1];
-      const total2 = s ? s.episode_count : 0;
-      return { season: s ? s.season_number : 1, aired: total2, total: total2, airing };
-    }
-    const season = last.season_number;
-    const info = findSeason(list, season);
-    const total = info ? info.episode_count : last.episode_number;
-    const future = !!last.air_date && !!today && last.air_date > today;
-    const aired = future ? Math.max(0, last.episode_number - 1) : last.episode_number;
-    return { season, aired, total, airing };
-  }
-
-  // src/queue.js
-  function createQueue(limit) {
-    let active = 0;
-    const waiting = [];
-    const next = () => {
-      if (active >= limit || !waiting.length) return;
-      active++;
-      const { job, resolve, reject } = waiting.shift();
-      Promise.resolve().then(job).then(resolve, reject).finally(() => {
-        active--;
-        next();
-      });
-    };
-    return (job) => new Promise((resolve, reject) => {
-      waiting.push({ job, resolve, reject });
-      next();
-    });
-  }
-
   // src/tmdb-queries.js
+  var GENRES_MOVIE = [
+    { id: 28, title: "\u0411\u043E\u0435\u0432\u0438\u043A" },
+    { id: 12, title: "\u041F\u0440\u0438\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F" },
+    { id: 16, title: "\u041C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C" },
+    { id: 35, title: "\u041A\u043E\u043C\u0435\u0434\u0438\u044F" },
+    { id: 80, title: "\u041A\u0440\u0438\u043C\u0438\u043D\u0430\u043B" },
+    { id: 18, title: "\u0414\u0440\u0430\u043C\u0430" },
+    { id: 14, title: "\u0424\u044D\u043D\u0442\u0435\u0437\u0438" },
+    { id: 27, title: "\u0423\u0436\u0430\u0441\u044B" },
+    { id: 9648, title: "\u0414\u0435\u0442\u0435\u043A\u0442\u0438\u0432" },
+    { id: 10749, title: "\u041C\u0435\u043B\u043E\u0434\u0440\u0430\u043C\u0430" },
+    { id: 878, title: "\u0424\u0430\u043D\u0442\u0430\u0441\u0442\u0438\u043A\u0430" },
+    { id: 53, title: "\u0422\u0440\u0438\u043B\u043B\u0435\u0440" },
+    { id: 10752, title: "\u0412\u043E\u0435\u043D\u043D\u044B\u0439" }
+  ];
+  var GENRES_TV = [
+    { id: 10759, title: "\u0411\u043E\u0435\u0432\u0438\u043A \u0438 \u043F\u0440\u0438\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F" },
+    { id: 16, title: "\u0410\u043D\u0438\u043C\u0430\u0446\u0438\u044F" },
+    { id: 35, title: "\u041A\u043E\u043C\u0435\u0434\u0438\u044F" },
+    { id: 80, title: "\u041A\u0440\u0438\u043C\u0438\u043D\u0430\u043B" },
+    { id: 18, title: "\u0414\u0440\u0430\u043C\u0430" },
+    { id: 9648, title: "\u0414\u0435\u0442\u0435\u043A\u0442\u0438\u0432" },
+    { id: 10765, title: "\u0424\u0430\u043D\u0442\u0430\u0441\u0442\u0438\u043A\u0430 \u0438 \u0444\u044D\u043D\u0442\u0435\u0437\u0438" },
+    { id: "horror", title: "\u0423\u0436\u0430\u0441\u044B" }
+    // TV has no horror genre: emulated via keywords
+  ];
+  var GENRE_HORROR_TV_KEYWORDS = [315058, 12377, 3133, 3358, 12339, 256183];
   var GENRE_ANIMATION = 16;
   var GENRE_DOCUMENTARY = 99;
+  function genresFor(kind) {
+    if (kind === "tv") return GENRES_TV;
+    if (kind === "movie") return GENRES_MOVIE;
+    const base = kind === "anime" ? GENRES_TV : kind === "cartoon" ? GENRES_MOVIE : [];
+    return base.filter((g) => g.id !== GENRE_ANIMATION);
+  }
   function daysAgo(today, n) {
     const [y, m, d] = today.split("-").map(Number);
     return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
@@ -341,6 +359,41 @@
         return null;
     }
   }
+  function yearRange(year) {
+    const m = typeof year === "string" && /^(\d{4})-(\d{4})$/.exec(year);
+    return m ? { from: `${m[1]}-01-01`, to: `${m[2]}-12-31` } : null;
+  }
+  function catalogQuery(kind, filters, page, today) {
+    const isTv = kind === "tv" || kind === "anime";
+    const params = { page, filter: {} };
+    const f = params.filter;
+    const fixed = kind === "anime" || kind === "cartoon";
+    if (filters.genre === "horror") {
+      params.keywords = GENRE_HORROR_TV_KEYWORDS.join("|");
+      if (fixed) params.genres = GENRE_ANIMATION;
+    } else if (fixed) {
+      params.genres = filters.genre != null ? `${GENRE_ANIMATION},${filters.genre}` : GENRE_ANIMATION;
+    } else if (filters.genre != null) {
+      params.genres = filters.genre;
+    }
+    if (kind === "anime") f.with_origin_country = "JP";
+    const dateField = isTv ? "first_air_date" : "primary_release_date";
+    if (filters.sort === "rating") {
+      params.sort_by = "vote_average.desc";
+      f["vote_count.gte"] = "100";
+    } else {
+      params.sort_by = `${dateField}.desc`;
+      f[`${dateField}.lte`] = today;
+    }
+    const range = yearRange(filters.year);
+    if (range) {
+      f[`${dateField}.gte`] = range.from;
+      f[`${dateField}.lte`] = range.to;
+    } else if (filters.year != null) {
+      f[isTv ? "first_air_date_year" : "primary_release_year"] = filters.year;
+    }
+    return { url: isTv ? "discover/tv" : "discover/movie", params };
+  }
 
   // src/cards.js
   var ROW_TITLES = {
@@ -373,6 +426,45 @@
     el.className = "lh-badge";
     el.textContent = badgeText(status);
     view.appendChild(el);
+  }
+
+  // src/episodes.js
+  var realSeasons = (seasons) => (seasons || []).filter((s) => s && s.season_number > 0).sort((a, b) => a.season_number - b.season_number);
+  var findSeason = (seasons, n) => realSeasons(seasons).find((s) => s.season_number === n);
+  function episodeStatus(tv, today) {
+    const list = realSeasons(tv && tv.seasons);
+    const last = tv && tv.last_episode_to_air;
+    const airing = !!tv && (tv.status === "Returning Series" || !!tv.next_episode_to_air);
+    if (!last) {
+      const s = list[list.length - 1];
+      const total2 = s ? s.episode_count : 0;
+      return { season: s ? s.season_number : 1, aired: total2, total: total2, airing };
+    }
+    const season = last.season_number;
+    const info = findSeason(list, season);
+    const total = info ? info.episode_count : last.episode_number;
+    const future = !!last.air_date && !!today && last.air_date > today;
+    const aired = future ? Math.max(0, last.episode_number - 1) : last.episode_number;
+    return { season, aired, total, airing };
+  }
+
+  // src/queue.js
+  function createQueue(limit) {
+    let active = 0;
+    const waiting = [];
+    const next = () => {
+      if (active >= limit || !waiting.length) return;
+      active++;
+      const { job, resolve, reject } = waiting.shift();
+      Promise.resolve().then(job).then(resolve, reject).finally(() => {
+        active--;
+        next();
+      });
+    };
+    return (job) => new Promise((resolve, reject) => {
+      waiting.push({ job, resolve, reject });
+      next();
+    });
   }
 
   // src/tmdb.js
@@ -418,6 +510,194 @@
       },
       () => null
     );
+  }
+
+  // src/catalog.js
+  var NAME = "lh_catalog";
+  var FILTER_CONTROLLER = "lh_catalog_filter";
+  var COLS = 4;
+  var FIRST_YEAR = 2010;
+  var DECADES = ["2000-2009", "1990-1999"];
+  var KIND_TITLES = { movie: "\u0424\u0438\u043B\u044C\u043C\u044B", tv: "\u0421\u0435\u0440\u0438\u0430\u043B\u044B", cartoon: "\u041C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B", anime: "\u0410\u043D\u0438\u043C\u0435" };
+  var SORT_TITLES = { new: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u043E\u0432\u044B\u0435", rating: "\u041F\u043E \u0440\u0435\u0439\u0442\u0438\u043D\u0433\u0443" };
+  var ROW_PRESETS = {
+    movies: { kind: "movie", preset: {} },
+    horror: { kind: "movie", preset: { genre: 27 } },
+    anime: { kind: "anime", preset: { sort: "new" } },
+    series: { kind: "tv", preset: {} },
+    cartoons: { kind: "cartoon", preset: {} }
+  };
+  function presetFor(rowKey) {
+    const p = ROW_PRESETS[rowKey];
+    return p ? { kind: p.kind, preset: { ...p.preset } } : null;
+  }
+  function applyPreset(stored, preset) {
+    return { ...stored, ...preset || {} };
+  }
+  var decadeTitle = (range) => range.replace("-", "\u2013");
+  function yearOptions(today) {
+    const current = Number(today.slice(0, 4));
+    const out = [{ title: "\u0412\u0441\u0435", value: null }];
+    for (let y = current; y >= FIRST_YEAR; y--) out.push({ title: String(y), value: y });
+    for (const d of DECADES) out.push({ title: decadeTitle(d), value: d });
+    return out;
+  }
+  function genreName(kind, id) {
+    const g = id != null && genresFor(kind).find((x) => x.id === id);
+    return g ? g.title : "\u0432\u0441\u0435";
+  }
+  function chosenLabels(kind, f) {
+    const year = f.year == null ? "\u0432\u0441\u0435" : typeof f.year === "string" ? decadeTitle(f.year) : String(f.year);
+    return {
+      genre: `\u0416\u0430\u043D\u0440: ${genreName(kind, f.genre)}`,
+      year: `\u0413\u043E\u0434: ${year}`,
+      sort: SORT_TITLES[f.sort] || SORT_TITLES.new
+    };
+  }
+  function load(kind, f, page, ok, fail) {
+    const q = catalogQuery(kind, f, page, todayIso());
+    tmdbGet(
+      q.url,
+      q.params,
+      (json) => ok({ ...json, results: (json && json.results || []).map(toWideCard) }),
+      fail
+    );
+  }
+  function component(object) {
+    const L = lampa();
+    const kind = object.kind;
+    object.params = { ...object.params || {}, items: { mapping: "grid", cols: COLS } };
+    const comp = L.Maker.make("Category", object, (m) => m.toggle(m.MASK.base, "Pagination"));
+    const f = store.filters.get(kind);
+    const filter = new L.Filter(object);
+    const head = document.createElement("div");
+    head.className = "lh-catalog__head";
+    let lastChip = false;
+    function toggleFilter() {
+      L.Controller.toggle(FILTER_CONTROLLER);
+    }
+    function apply(patch) {
+      store.filters.set(kind, { ...f, ...patch });
+      L.Activity.replace({ page: 1 });
+    }
+    function pick(title, items, current, onPick) {
+      L.Select.show({
+        title,
+        items: items.map((it) => ({ title: it.title, value: it.value, selected: it.value === current })),
+        onSelect: (a) => onPick(a.value),
+        onBack: toggleFilter
+      });
+    }
+    function buildFilter() {
+      const labels = chosenLabels(kind, f);
+      filter.set("filter", [
+        { title: labels.genre, lh: "genre" },
+        { title: labels.year, lh: "year" }
+      ]);
+      filter.set("sort", Object.keys(SORT_TITLES).map((key) => ({
+        title: SORT_TITLES[key],
+        lh: key,
+        selected: key === f.sort
+      })));
+      filter.onBack = toggleFilter;
+      filter.onSelect = (type, a) => {
+        if (type === "sort") {
+          if (a.lh === f.sort) toggleFilter();
+          else apply({ sort: a.lh });
+        } else if (a.lh === "genre") {
+          const genres = [{ title: "\u0412\u0441\u0435", value: null }].concat(
+            genresFor(kind).map((g) => ({ title: g.title, value: g.id }))
+          );
+          pick("\u0416\u0430\u043D\u0440", genres, f.genre, (genre) => apply({ genre }));
+        } else {
+          pick("\u0413\u043E\u0434", yearOptions(todayIso()), f.year, (year) => apply({ year }));
+        }
+      };
+      const line = filter.render();
+      line.find(".filter--search").remove();
+      line.find(".filter--filter > div").text(`${labels.genre}, ${labels.year}`).removeClass("hide");
+      line.find(".filter--sort > div").text(labels.sort).removeClass("hide");
+      line.find(".selector").on("hover:focus", (e) => {
+        lastChip = e.target;
+      });
+      head.append(line[0]);
+    }
+    const addFilterController = () => L.Controller.add(FILTER_CONTROLLER, {
+      toggle: () => {
+        L.Controller.collectionSet(head);
+        L.Controller.collectionFocus(lastChip, head);
+      },
+      left: () => {
+        if (Navigator.canmove("left")) Navigator.move("left");
+        else L.Controller.toggle("menu");
+      },
+      right: () => {
+        if (Navigator.canmove("right")) Navigator.move("right");
+      },
+      up: () => L.Controller.toggle("head"),
+      down: () => comp.start(),
+      back: () => L.Activity.backward()
+    });
+    comp.use({
+      onStart: addFilterController,
+      onCreate() {
+        this.render(true).classList.add("lh-catalog");
+        buildFilter();
+        this.render(true).prepend(head);
+        this.scroll.minus(head);
+        load(kind, f, 1, this.build.bind(this), this.empty.bind(this));
+      },
+      onNext(resolve, reject) {
+        load(kind, f, object.page, resolve.bind(this), reject.bind(this));
+      },
+      onController(controller) {
+        controller.up = () => {
+          if (Navigator.canmove("up")) Navigator.move("up");
+          else toggleFilter();
+        };
+      },
+      onEmpty() {
+        if (this.empty_class) {
+          this.empty_class.use({
+            onStart: addFilterController,
+            onController: (controller) => {
+              controller.up = toggleFilter;
+            }
+          });
+        }
+      },
+      onInstance(item, data) {
+        item.use({
+          onEnter: L.Router.call.bind(L.Router, "full", data),
+          onFocus() {
+            L.Background.change(L.Utils.cardImgBackground(data));
+          }
+        });
+      },
+      onDestroy() {
+        filter.destroy();
+        head.remove();
+      }
+    });
+    return comp;
+  }
+  function register() {
+    lampa().Component.add(NAME, component);
+  }
+  function open(kind, preset) {
+    if (preset) store.filters.set(kind, applyPreset(store.filters.get(kind), preset));
+    lampa().Activity.push({ url: "", component: NAME, kind, title: KIND_TITLES[kind], page: 1, source: "tmdb" });
+  }
+  function openHistory() {
+    const L = lampa();
+    const fav = L.Favorite;
+    const base = fav && typeof fav.historyActivity === "function" ? fav.historyActivity() : { component: "favorite", type: "history", title: L.Lang.translate("title_history") };
+    L.Activity.push({ url: "", page: 1, ...base });
+  }
+  function openForRow(rowKey) {
+    if (rowKey === "history") return openHistory();
+    const p = presetFor(rowKey);
+    if (p) open(p.kind, p.preset);
   }
 
   // src/templates.js
@@ -470,20 +750,17 @@
       backdrop: path ? esc(img(path, "w1280")) : ""
     };
   }
-  function register() {
+  function register2() {
     lampa().Template.add(BANNER, BANNER_HTML);
   }
 
   // src/home.js
-  var NAME = "lh_home";
+  var NAME2 = "lh_home";
   var TITLE = "\u0413\u043B\u0430\u0432\u043D\u0430\u044F";
   var MARKER = "lh_home_live";
   function wantsBadge(rowKey, cardData) {
     if (rowKey === "anime" || rowKey === "series") return true;
     return rowKey === "history" && !!cardData.original_name;
-  }
-  function openCatalog(rowKey) {
-    noty("\u041A\u0430\u0442\u0430\u043B\u043E\u0433: \u0441\u043A\u043E\u0440\u043E");
   }
   function bannerCard(rows) {
     const row = rows.find((r) => r.params.lh_row === "movies") || rows[0];
@@ -541,7 +818,7 @@
       params: { items: { view: 6 }, lh_row: row.rowKey }
     }));
   }
-  function component(object) {
+  function component2(object) {
     const L = lampa();
     const comp = L.Maker.make("Main", object);
     comp[MARKER] = true;
@@ -570,7 +847,7 @@
       onInstance(item, data) {
         const rowKey = data.params && data.params.lh_row;
         item.use({
-          onMore: () => openCatalog(rowKey),
+          onMore: () => openForRow(rowKey),
           onInstance(card, cardData) {
             card.use({
               onEnter: L.Router.call.bind(L.Router, "full", cardData),
@@ -594,16 +871,17 @@
     });
     return comp;
   }
-  function register2() {
-    lampa().Component.add(NAME, component);
+  function register3() {
+    lampa().Component.add(NAME2, component2);
   }
-  function open() {
-    lampa().Activity.push({ component: NAME, title: TITLE, url: "", page: 1, source: "tmdb" });
+  function open2() {
+    lampa().Activity.push({ component: NAME2, title: TITLE, url: "", page: 1, source: "tmdb" });
   }
-  var COMPONENT = NAME;
+  var COMPONENT = NAME2;
   var HOME_TITLE = TITLE;
 
   // src/menu.js
+  var CATALOG_ACTIONS = ["movie", "tv", "cartoon", "anime"];
   function needsSwap(active) {
     if (!active) return false;
     if (active.component === "main") return true;
@@ -625,9 +903,13 @@
   function init() {
     const L = lampa();
     L.Listener.follow("menu", (e) => {
-      if (e.type === "action" && e.action === "main") {
+      if (e.type !== "action") return;
+      if (e.action === "main") {
         e.abort();
-        open();
+        open2();
+      } else if (CATALOG_ACTIONS.includes(e.action)) {
+        e.abort();
+        open(e.action);
       }
     });
     if (L.Activity.active()) {
@@ -658,8 +940,9 @@
   }
   function init2() {
     injectCss(styles_default);
-    register();
     register2();
+    register3();
+    register();
     init();
     console.log(PLUGIN, VERSION, "loaded");
   }

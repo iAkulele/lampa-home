@@ -116,8 +116,14 @@ export function rowQuery(rowKey, today) {
   }
 }
 
+// A decade filter is stored as 'YYYY-YYYY'; single years stay numbers (-> null here).
+export function yearRange(year) {
+  const m = typeof year === 'string' && /^(\d{4})-(\d{4})$/.exec(year);
+  return m ? { from: `${m[1]}-01-01`, to: `${m[2]}-12-31` } : null;
+}
+
 // kind: 'movie' | 'tv' | 'cartoon' | 'anime'
-// filters: { genre: number|'horror'|null, year: number|null, sort: 'new'|'rating' }
+// filters: { genre: number|'horror'|null, year: number|'YYYY-YYYY'|null, sort: 'new'|'rating' }
 // For 'anime' and 'cartoon' genre 16 is always applied; a chosen genre is ANDed with it.
 export function catalogQuery(kind, filters, page, today) {
   const isTv = kind === 'tv' || kind === 'anime';
@@ -144,7 +150,12 @@ export function catalogQuery(kind, filters, page, today) {
     params.sort_by = `${dateField}.desc`;
     f[`${dateField}.lte`] = today;
   }
-  if (filters.year != null) {
+  const range = yearRange(filters.year);
+  if (range) {
+    f[`${dateField}.gte`] = range.from;
+    // the range end is in the past, so it is also tighter than lte=today
+    f[`${dateField}.lte`] = range.to;
+  } else if (filters.year != null) {
     f[isTv ? 'first_air_date_year' : 'primary_release_year'] = filters.year;
   }
 
