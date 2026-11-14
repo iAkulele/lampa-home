@@ -58,3 +58,7 @@ test('test_replace_plan', () => {
   // An entry without a hash has nothing on disk to remove.
   assert.strictEqual(replacePlan({}, h1), 'new');
 });
+
+test('test_badge_label_missing_on_server', () => {
+  assert.strictEqual(badgeLabel({ missing: true, percent: 0, done: false }), 'Удалено на сервере');
+});

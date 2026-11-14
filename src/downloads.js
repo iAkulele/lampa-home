@@ -4,7 +4,9 @@
 // helper on the PC (helper/ts-clean.js): TorrServer itself cannot delete its cache
 // folder without changing its settings, which the plugin never does.
 import { lampa, store, storageField } from './lampa.js';
-import { resolveTarget, searchTorrents, buildSearchParams, pickFile, startFromHash, isBusy } from './play.js';
+import {
+  resolveTarget, searchTorrents, buildSearchParams, pickFile, fileInfos, titleHasSeason, startFromHash, isBusy,
+} from './play.js';
 import { selectTorrent } from './torrent-select.js';
 import { toWideCard, applyPosterClass } from './cards.js';
 import { createQueue } from './queue.js';
@@ -37,12 +39,16 @@ const MSG = {
   replaced: 'Прежняя закачка удалена',
   replaceFailed: 'Помощник на ПК недоступен: прежняя закачка не удалена, новая не начата',
   confirm: 'Удалить с диска?',
+  missing: 'Удалено на сервере',
+  forget: 'Убрать из списка',
+  forgotten: 'Убрано из списка',
 };
 
 // Card fields the «Скачанное» screen and the player need; the rest of a full card
 // (overview, credits, seasons...) is not stored.
 const SNAPSHOT_FIELDS = ['id', 'title', 'name', 'original_title', 'original_name', 'original_language',
-  'backdrop_path', 'poster_path', 'genre_ids', 'origin_country', 'release_date', 'first_air_date', 'runtime'];
+  'backdrop_path', 'poster_path', 'genre_ids', 'origin_country', 'release_date', 'first_air_date', 'runtime',
+  'number_of_seasons'];
 
 // ---------- pure helpers ----------
 
@@ -75,6 +81,7 @@ export function replacePlan(existing, newHash) {
 
 export function badgeLabel(progress) {
   if (!progress) return '';
+  if (progress.missing) return MSG.missing;
   return progress.done ? 'Скачано' : `Качается ${progress.percent} %`;
 }
 
@@ -111,7 +118,11 @@ async function tsTorrents(body) {
   } catch (e) {
     throw fail(MSG.torrserver);
   }
-  if (!res.ok) throw fail(MSG.torrserver);
+  if (!res.ok) {
+    const err = fail(MSG.torrserver);
+    err.status = res.status;
+    throw err;
+  }
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
@@ -219,7 +230,7 @@ export async function preload(card) {
     L.Loading.setText(MSG.files);
     const files = await waitFiles(hash, job);
     if (job.cancelled || !files) return;
-    const file = pickFile(files, ctx);
+    const file = pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(chosen.Title) }, fileInfos(files, movie));
     if (!file) throw fail(MSG.noFile);
 
     const key = entryKey(movie);
@@ -230,7 +241,6 @@ export async function preload(card) {
       try {
         await helperDelete(existing.hash);
       } catch (e) {
-        console.log('lampa-home', 'helper delete failed', e && e.message);
         throw fail(MSG.replaceFailed);
       }
       store.preload.remove(key);
@@ -252,7 +262,6 @@ export async function preload(card) {
       added: Date.now(),
       card: snapshot,
     });
-    console.log('lampa-home', 'preload', ctx, chosen.Title, hash, file.id);
     finish();
     L.Noty.show(replaced ? `${MSG.replaced}. ${MSG.started}` : MSG.started);
   } catch (err) {
@@ -264,9 +273,16 @@ export async function preload(card) {
   }
 }
 
-// -> {loaded, size, percent, done}
+// -> {loaded, size, percent, done}, or {missing: true} when TorrServer no longer
+// knows the hash (removed on the server: `get` answers 404).
 export async function status(hash, index) {
-  const json = await tsTorrents({ action: 'get', hash });
+  let json;
+  try {
+    json = await tsTorrents({ action: 'get', hash });
+  } catch (err) {
+    if (err && err.status === 404) return { loaded: 0, size: 0, percent: 0, done: false, missing: true };
+    throw err;
+  }
   const p = preloadProgress({ loaded_size: json && json.loaded_size, file_stats: json && json.file_stats, index });
   const file = ((json && json.file_stats) || []).find((f) => f.id === index);
   return { loaded: (json && json.loaded_size) || 0, size: (file && file.length) || 0, ...p };
@@ -283,7 +299,6 @@ export async function remove(cardId) {
   try {
     await helperDelete(entry.hash);
   } catch (e) {
-    console.log('lampa-home', 'helper delete failed', e && e.message);
     L.Loading.stop();
     L.Noty.show(MSG.helper);
     return false;
@@ -292,6 +307,12 @@ export async function remove(cardId) {
   store.preload.remove(cardId);
   L.Noty.show(MSG.removed);
   return true;
+}
+
+// Drops the entry from the list only (nothing is deleted on the PC or the server).
+export function forget(cardId) {
+  store.preload.remove(cardId);
+  lampa().Noty.show(MSG.forgotten);
 }
 
 // ---------- «Скачанное» screen ----------
@@ -318,6 +339,8 @@ function component(object) {
       pending++;
       pollQueue(() => status(entry.hash, entry.index))
         .then((p) => {
+          const state = badges.get(entry.cardId);
+          if (state) state.missing = !!p.missing;
           el.textContent = badgeLabel(p);
           el.classList.toggle('lh-dl-badge--done', p.done);
         })
@@ -330,19 +353,48 @@ function component(object) {
     });
   }
 
-  function confirmRemove(cardId) {
+  const reload = () => {
+    if (isActive()) L.Activity.replace();
+  };
+
+  function ask(title, items, onPick) {
     const enabled = L.Controller.enabled().name;
     L.Select.show({
-      title: MSG.confirm,
-      items: [{ title: 'Удалить', remove: true }, { title: 'Отмена' }],
+      title,
+      items: [...items, { title: 'Отмена' }],
       onSelect: (a) => {
         L.Controller.toggle(enabled);
-        if (!a.remove) return;
-        remove(cardId).then((ok) => {
-          if (ok && isActive()) L.Activity.replace();
-        });
+        onPick(a);
       },
       onBack: () => L.Controller.toggle(enabled),
+    });
+  }
+
+  // The helper failed: the entry can still leave the list, files stay on the PC.
+  function offerForget(cardId) {
+    ask(MSG.helper, [{ title: MSG.forget, forget: true }], (a) => {
+      if (!a.forget) return;
+      forget(cardId);
+      reload();
+    });
+  }
+
+  function confirmRemove(cardId) {
+    const state = badges.get(cardId);
+    if (state && state.missing) {
+      ask(MSG.missing, [{ title: MSG.forget, forget: true }, { title: 'Удалить с диска', remove: true }], (a) => {
+        if (a.forget) {
+          forget(cardId);
+          reload();
+        } else if (a.remove) {
+          remove(cardId).then((ok) => (ok ? reload() : offerForget(cardId)));
+        }
+      });
+      return;
+    }
+    ask(MSG.confirm, [{ title: 'Удалить', remove: true }], (a) => {
+      if (!a.remove) return;
+      remove(cardId).then((ok) => (ok ? reload() : offerForget(cardId)));
     });
   }
 
@@ -380,8 +432,10 @@ function component(object) {
           el.addEventListener('hover:long', guarded(comp, () => confirmRemove(entry.cardId)));
         },
         onEnter: guarded(comp, () => {
-          const { card, hash, index, kind, season, episode, absolute } = entry;
-          startFromHash(hash, card, { kind, season, episode, absolute, index });
+          const state = badges.get(entry.cardId);
+          if (state && state.missing) return confirmRemove(entry.cardId);
+          const { card, hash, index, kind, season, episode, absolute, title } = entry;
+          startFromHash(hash, card, { kind, season, episode, absolute, index }, title);
         }),
         onFocus() {
           L.Background.change(L.Utils.cardImgBackground(data));

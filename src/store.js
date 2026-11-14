@@ -90,13 +90,15 @@ export function createStore(storage, now = () => Date.now()) {
     },
   };
 
+  // Keeps the MAX_ENTRIES newest by `field`; null / non-object entries are dropped.
   function trim(key, field) {
     const all = read(key);
     const ids = Object.keys(all);
-    if (ids.length <= MAX_ENTRIES) return;
-    ids.sort((a, b) => (all[b][field] || 0) - (all[a][field] || 0));
+    const valid = ids.filter((id) => all[id] && typeof all[id] === 'object');
+    if (ids.length <= MAX_ENTRIES && valid.length === ids.length) return;
+    valid.sort((a, b) => (Number(all[b][field]) || 0) - (Number(all[a][field]) || 0));
     const kept = {};
-    for (const id of ids.slice(0, MAX_ENTRIES)) kept[id] = all[id];
+    for (const id of valid.slice(0, MAX_ENTRIES)) kept[id] = all[id];
     storage.set(key, kept);
   }
 

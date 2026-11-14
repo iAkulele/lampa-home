@@ -36,3 +36,24 @@ test('test_should_mark_only_when_a_status_arrived', async () => {
   assert.strictEqual(shouldMark([{ status: null }, { status: null }]), false);
   assert.strictEqual(shouldMark([{ status: null }, { status: { airing: false, aired: 1 } }]), true);
 });
+
+test('test_candidate_kind_japanese_show_without_genres', async () => {
+  const { candidateKind, confirmAnime } = await import('../src/notify.js');
+  const frieren = { id: 1, original_name: 'Sousou no Frieren', origin_country: ['JP'], genre_ids: [16] };
+  const bare = { id: 2, original_name: 'Sousou no Frieren', origin_country: ['JP'] };
+  const shogun = { id: 3, original_name: 'Shogun', origin_country: ['JP'], genre_ids: [18] };
+  const film = { id: 4, original_title: 'Akira', origin_country: ['JP'] };
+  assert.strictEqual(candidateKind(frieren), 'anime');
+  assert.strictEqual(candidateKind(bare), 'maybe');
+  assert.strictEqual(candidateKind({ ...bare, genres: [{ id: 16, name: 'анимация' }] }), 'anime');
+  assert.strictEqual(candidateKind(shogun), null);
+  assert.strictEqual(candidateKind(film), null);
+  // 'maybe' is kept only when the TV details confirm animation.
+  const kept = confirmAnime([
+    { card: frieren, status: { airing: true, aired: 3 } },
+    { card: bare, status: { airing: true, aired: 3, animation: true } },
+    { card: { ...bare, id: 5 }, status: { airing: true, aired: 3, animation: false } },
+    { card: { ...bare, id: 6 }, status: null },
+  ]);
+  assert.deepStrictEqual(kept.map((i) => i.card.id), [1, 2]);
+});

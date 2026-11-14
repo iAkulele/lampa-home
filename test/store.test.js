@@ -101,3 +101,12 @@ test('test_preload_remove', () => {
   assert.strictEqual(store.preload.get(1), null);
   assert.deepStrictEqual(store.preload.all(), []);
 });
+
+test('test_prune_skips_malformed_entries', () => {
+  const { store, storage } = make(0);
+  storage.set(STORAGE_KEYS.progress, { 1: null, 2: 'junk', 3: { season: 1, episode: 2, updated: 5 } });
+  storage.set(STORAGE_KEYS.tvcache, { 7: null, 8: { status: null, checked: 1 } });
+  assert.doesNotThrow(() => store.prune());
+  assert.deepStrictEqual(Object.keys(storage.get(STORAGE_KEYS.progress, {})), ['3']);
+  assert.deepStrictEqual(Object.keys(storage.get(STORAGE_KEYS.tvcache, {})), ['8']);
+});

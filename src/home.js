@@ -82,6 +82,16 @@ export function buildRows(loaded) {
     }));
 }
 
+// Our home failed to build: tell the user and put Lampa's native main page in its place.
+function fallbackToNative(err) {
+  const L = lampa();
+  console.error('lampa-home home', err);
+  L.Noty.show('Lampa Home: ошибка, открываю штатную главную');
+  const active = L.Activity.active();
+  if (!active || active.component !== NAME) return;
+  L.Activity.replace({ component: 'main', title: L.Lang.translate('title_main') });
+}
+
 function component(object) {
   const L = lampa();
   const comp = L.Maker.make('Main', object);
@@ -103,8 +113,8 @@ function component(object) {
           this.items.push(banner);
         }
         this.build(rows);
-      }).catch(() => {
-        if (!this.destroyed) this.empty();
+      }).catch((e) => {
+        if (!this.destroyed) fallbackToNative(e);
       });
     },
     onNext(resolve, reject) {

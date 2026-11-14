@@ -244,7 +244,8 @@
   };
   var RUSSIAN_MARKERS = "(?<![\\p{L}\\d])(?:rus(?![\\p{L}\\d])|\u0440\u0443\u0441)|\u0434\u0443\u0431\u043B\u044F\u0436|\\bmvo\\b|\\bdvo\\b|\\bavo\\b|\u043C\u043D\u043E\u0433\u043E\u0433\u043E\u043B\u043E\u0441|\u0434\u0432\u0443\u0445\u0433\u043E\u043B\u043E\u0441|\u043E\u0434\u043D\u043E\u0433\u043E\u043B\u043E\u0441|\u043B\u0438\u0446\u0435\u043D\u0437\u0438\u044F|itunes|\\bp[12]\\b|(?<![\\p{L}\\d])\u0434(?![\\p{L}\\d])|\u043B\u043E\u0441\u0442";
   var SCREENER_MARKERS = "camrip|\\bcam\\b|telesync|\\bts\\b|\\btc\\b|hdts|hdtc|telecine|\u044D\u043A\u0440\u0430\u043D\u043A|\\bline\\b";
-  var DV_MARKERS = "\\bdv\\b|dolby ?vision";
+  var DV_MARKERS = "\\bdv\\b|\\bdovi\\b|dolby[ ._-]?vision";
+  var DV_P5_MARKERS = "\\bp5\\b|profile ?5";
   var HDR_MARKERS = "hdr10|hdr\\b|\\bp8\\b|profile ?8";
   var SCORING = {
     quality: { 2160: 100, 1080: 80, 720: 20, anime720: 60, 480: 10, unknown: 40 },
@@ -258,7 +259,9 @@
     deadPenalty: 60,
     sizePenaltyPerGiB: 0.2
   };
-  var SUBTITLE_PHRASES = "(?<![\\p{L}\\d])(?:rus|\u0440\u0443\u0441\\p{L}*)\\s*(?:sub\\p{L}*|\u0441\u0443\u0431\u0442\u0438\u0442\u0440\\p{L}*)|(?:sub\\p{L}*|\u0441\u0443\u0431\u0442\u0438\u0442\u0440\\p{L}*)[\\s:.\\-]*(?:rus(?![\\p{L}\\d])|\u0440\u0443\u0441\\p{L}*)";
+  var SUB_WORD = "(?:sub(?:s|titles?)?(?!\\p{L})|\u0441\u0443\u0431\u0442\u0438\u0442\u0440\\p{L}*)";
+  var SUB_LANG = "(?:(?:rus|eng|ukr|jap)\\p{L}*|\u0440\u0443\u0441\\p{L}*|\u0430\u043D\u0433\u043B\\p{L}*|\u0443\u043A\u0440\\p{L}*)";
+  var SUBTITLE_PHRASES = "(?<![\\p{L}\\d])(?:rus|\u0440\u0443\u0441\\p{L}*)[\\s.]*" + SUB_WORD + "|(?<![\\p{L}\\d])" + SUB_WORD + "[\\s:.(\\-]*(?:" + SUB_LANG + "[\\s,+/.]*)+\\)?";
 
   // src/store.js
   var MAX_ENTRIES = 200;
@@ -344,10 +347,11 @@
     function trim(key, field) {
       const all = read(key);
       const ids = Object.keys(all);
-      if (ids.length <= MAX_ENTRIES) return;
-      ids.sort((a, b) => (all[b][field] || 0) - (all[a][field] || 0));
+      const valid = ids.filter((id) => all[id] && typeof all[id] === "object");
+      if (ids.length <= MAX_ENTRIES && valid.length === ids.length) return;
+      valid.sort((a, b) => (Number(all[b][field]) || 0) - (Number(all[a][field]) || 0));
       const kept = {};
-      for (const id of ids.slice(0, MAX_ENTRIES)) kept[id] = all[id];
+      for (const id of valid.slice(0, MAX_ENTRIES)) kept[id] = all[id];
       storage2.set(key, kept);
     }
     function prune() {
@@ -406,7 +410,8 @@
     }
     return { season: progress.season, episode: progress.episode };
   }
-  var NOT_EPISODE_NUMBERS = /* @__PURE__ */ new Set([360, 480, 576, 720, 1080, 1440, 2160, 4320]);
+  var NOT_EPISODE_NUMBERS = /* @__PURE__ */ new Set([360, 480, 576, 1440, 2160, 4320]);
+  var RESOLUTIONS = /* @__PURE__ */ new Set([...NOT_EPISODE_NUMBERS, 720, 1080]);
   function parseEpisode(filename) {
     const result = (season, episode, absolute) => ({ season, episode, absolute });
     let name = String(filename || "").replace(/^.*[\\/]/, "");
@@ -419,7 +424,9 @@
     if (m) return result(+m[1], +m[2], null);
     m = name.match(/(?<![0-9A-Za-z])(?:ep(?:isode)?|e)[ ._-]?(\d{1,4})(?!\d)/i) || name.match(/сери[яи][ ._-]?(\d{1,4})(?!\d)/i);
     if (m) return result(null, +m[1], +m[1]);
-    m = name.match(/\[(\d{1,4})\]/) || name.match(/\s-\s(\d{1,4})(?=\s|\.|\[|$)/);
+    m = name.match(/\[(\d{1,4})\]/);
+    if (m && !RESOLUTIONS.has(+m[1])) return result(null, +m[1], +m[1]);
+    m = name.match(/\s-\s(\d{1,4})(?=\s|\.|\[|$)/);
     if (m && !NOT_EPISODE_NUMBERS.has(+m[1])) return result(null, +m[1], +m[1]);
     return result(null, null, null);
   }
@@ -431,6 +438,7 @@
   var RE_SUBS = re(SUBTITLE_PHRASES);
   var RE_SCREENER = re(SCREENER_MARKERS);
   var RE_DV = re(DV_MARKERS);
+  var RE_DV_P5 = re(DV_P5_MARKERS);
   var RE_HDR = re(HDR_MARKERS);
   var STUDIO_RES = Object.entries(VOICE_STUDIOS).map(([id, src]) => [id, re(src)]);
   function detectStudio(title) {
@@ -467,6 +475,12 @@
     let m;
     const sx = /(?<![\p{L}\d])s(\d{1,2})(?:\s*-\s*s?(\d{1,2}))?(?![\d])(?!e\d)/giu;
     while (m = sx.exec(t)) add(+m[1], m[2] ? +m[2] : +m[1]);
+    const en = /(?<![\p{L}\d])season\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?(?![\d])/giu;
+    while (m = en.exec(t)) add(+m[1], m[2] ? +m[2] : +m[1]);
+    const nth = /(?<![\p{L}\d])(\d{1,2})(?:st|nd|rd|th)\s+season/giu;
+    while (m = nth.exec(t)) add(+m[1], +m[1]);
+    const tv = /(?<![\p{L}\d])tv-?(\d{1,2})(?![\d])/giu;
+    while (m = tv.exec(t)) add(+m[1], +m[1]);
     const before = /(?<![\p{L}\d])(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*сезон/giu;
     let prefixed = false;
     while (m = before.exec(t)) {
@@ -500,12 +514,13 @@
     const studio = detectStudio(t);
     const hdr = RE_HDR.test(t);
     const dv = RE_DV.test(t);
+    const dvP5 = dv && RE_DV_P5.test(t);
     const range = detectEpisodeRange(t);
     const ep = parseEpisode(t);
     return {
       resolution: detectResolution(t),
       screener: RE_SCREENER.test(t),
-      dvOnly: dv && !hdr,
+      dvOnly: dv && (dvP5 || !hdr),
       hdr,
       russian: RE_RUSSIAN.test(audioText) || studio !== null,
       voice: detectVoice(t, studio, audioText),
@@ -635,11 +650,12 @@
     const [y, m, d] = today.split("-").map(Number);
     return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
   }
+  var MOVIE_DATE = "release_date";
   function movieFilter(today) {
     return {
       with_release_type: "4",
       region: "US",
-      "primary_release_date.lte": today
+      [`${MOVIE_DATE}.lte`]: today
     };
   }
   function rowQuery(rowKey, today) {
@@ -648,7 +664,7 @@
         return {
           url: "discover/movie",
           params: {
-            sort_by: "primary_release_date.desc",
+            sort_by: `${MOVIE_DATE}.desc`,
             filter: {
               ...movieFilter(today),
               without_genres: `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`,
@@ -661,7 +677,7 @@
           url: "discover/movie",
           params: {
             genres: 27,
-            sort_by: "primary_release_date.desc",
+            sort_by: `${MOVIE_DATE}.desc`,
             filter: { ...movieFilter(today), "vote_count.gte": "20" }
           }
         };
@@ -671,7 +687,13 @@
           params: {
             genres: GENRE_ANIMATION,
             sort_by: "popularity.desc",
-            filter: { with_origin_country: "JP", "air_date.gte": daysAgo(today, 14), "vote_count.gte": "5" }
+            // air_date.lte: shows whose only "recent" episode is still announced stay out.
+            filter: {
+              with_origin_country: "JP",
+              "air_date.gte": daysAgo(today, 14),
+              "air_date.lte": today,
+              "vote_count.gte": "5"
+            }
           }
         };
       case "series":
@@ -682,6 +704,7 @@
             filter: {
               without_genres: String(GENRE_ANIMATION),
               "air_date.gte": daysAgo(today, 30),
+              "air_date.lte": today,
               "vote_count.gte": "5"
             }
           }
@@ -691,7 +714,7 @@
           url: "discover/movie",
           params: {
             genres: GENRE_ANIMATION,
-            sort_by: "primary_release_date.desc",
+            sort_by: `${MOVIE_DATE}.desc`,
             filter: { ...movieFilter(today), "vote_count.gte": "20" }
           }
         };
@@ -717,7 +740,10 @@
       params.genres = filters.genre;
     }
     if (kind === "anime") f.with_origin_country = "JP";
-    const dateField = isTv ? "first_air_date" : "primary_release_date";
+    if (kind === "movie" && filters.genre !== GENRE_ANIMATION) {
+      f.without_genres = `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`;
+    }
+    const dateField = isTv ? "first_air_date" : MOVIE_DATE;
     if (!isTv) Object.assign(f, movieFilter(today));
     if (filters.sort === "rating") {
       params.sort_by = "vote_average.desc";
@@ -843,7 +869,8 @@
     if (hit) return Promise.resolve(hit.status);
     return tvQueue(() => loadTv(tvId)).then(
       (json) => {
-        const status2 = episodeStatus(json, today);
+        const genres = json && json.genres || [];
+        const status2 = { ...episodeStatus(json, today), animation: genres.some((g) => g && g.id === 16) };
         store.tvcache.set(tvId, status2);
         return status2;
       },
@@ -876,13 +903,21 @@
   var fail = (msg) => new PlayError(msg);
   var ext = (path) => String(path || "").split(".").pop().toLowerCase();
   var isVideo = (f) => VIDEO.includes(ext(f.path));
+  function genreIds(card) {
+    if (!card) return [];
+    if (Array.isArray(card.genre_ids) && card.genre_ids.length) return card.genre_ids;
+    return (Array.isArray(card.genres) ? card.genres : []).map((g) => g && g.id).filter((id) => id != null);
+  }
   function detectKind(card) {
     if (!card || !card.original_name) return "movie";
-    const genres = card.genre_ids || (card.genres || []).map((g) => g && g.id);
     const jp = (card.origin_country || []).includes("JP");
-    return jp && genres.includes(ANIMATION) ? "anime" : "tv";
+    return jp && genreIds(card).includes(ANIMATION) ? "anime" : "tv";
   }
-  function pickFile(files, ctx) {
+  function titleHasSeason(title) {
+    const p = parseTitle(title);
+    return !!(p.seasons || p.sxeRange || p.episode && p.episode.season != null);
+  }
+  function pickFile(files, ctx, infos) {
     const videos = (files || []).filter(isVideo);
     if (!videos.length) return null;
     if (ctx.kind === "movie") {
@@ -892,9 +927,36 @@
     const bySxe = parsed.find(({ ep }) => ep.season != null && ep.season === ctx.season && ep.episode === ctx.episode);
     if (bySxe) return bySxe.f;
     const bare = parsed.filter(({ ep }) => ep.season == null && ep.absolute != null);
-    const byAbs = bare.find(({ ep }) => ctx.absolute != null && ep.absolute === ctx.absolute) || bare.find(({ ep }) => ep.absolute === ctx.episode);
-    if (byAbs) return byAbs.f;
+    const absFirst = ctx.kind === "anime" && !ctx.titleHasSeason;
+    const numbers = absFirst ? [ctx.absolute, ctx.episode] : [ctx.episode, ctx.absolute];
+    let ambiguous = false;
+    for (const n of numbers) {
+      if (n == null) continue;
+      const hits = bare.filter(({ ep }) => ep.absolute === n);
+      if (hits.length === 1) return hits[0].f;
+      if (hits.length > 1) {
+        ambiguous = true;
+        break;
+      }
+    }
+    if (Array.isArray(infos)) {
+      const ids = new Set(videos.map((f) => f.id));
+      const hits = infos.filter((i) => i && ids.has(i.id) && i.season === ctx.season && i.episode === ctx.episode);
+      if (hits.length === 1) return videos.find((f) => f.id === hits[0].id);
+    }
+    if (ambiguous) return null;
     return videos.length === 1 && parsed[0].ep.episode == null ? videos[0] : null;
+  }
+  function resumeTarget(progress, view) {
+    if (!progress || !view) return null;
+    if (!(view.time > 0) || !(view.percent < WATCHED_PERCENT)) return null;
+    return { season: progress.season, episode: progress.episode };
+  }
+  function normalizeTitles(card) {
+    const out = { ...card };
+    if (!out.title && out.name) out.title = out.name;
+    if (!out.original_title && out.original_name) out.original_title = out.original_name;
+    return out;
   }
   function advanceWatched(target, seasons, isWatched) {
     let t = { season: target.season, episode: target.episode };
@@ -957,7 +1019,7 @@
       movie = { ...card, genres: [] };
     }
     if (!movie.img && movie.poster_path) movie = { ...movie, img: L.Api.img(movie.poster_path) };
-    return { movie, details };
+    return { movie: normalizeTitles(movie), details };
   }
   function searchTorrents(params) {
     const L = lampa();
@@ -1005,19 +1067,32 @@
     });
   }
   var natural = (p) => p.replace(/\d+/g, (m) => m.length > 3 ? m : ("000" + m).substr(-4));
-  function buildPlaylist(files, movie, hash) {
+  function parsePlays(files, movie) {
     const L = lampa();
     const plays = L.Torserver.clearFileName(
       files.filter(isVideo).sort((a, b) => natural(a.path).localeCompare(natural(b.path)))
     );
-    return plays.map((file) => {
-      const info = L.Torserver.parse({
+    return plays.map((file) => ({
+      file,
+      info: L.Torserver.parse({
         movie,
         files: plays,
         filename: file.path_human,
         path: file.path,
         is_file: INDIVIDUAL.includes(ext(file.path))
-      });
+      })
+    }));
+  }
+  function fileInfos(files, movie) {
+    try {
+      return parsePlays(files, movie).map(({ file, info }) => ({ id: file.id, season: info.season, episode: info.episode }));
+    } catch (e) {
+      return null;
+    }
+  }
+  function buildPlaylist(files, movie, hash) {
+    const L = lampa();
+    return parsePlays(files, movie).map(({ file, info }) => {
       const link = info.by_title && (!info.serial || info.episode) ? L.Timeline.link(movie, info.season, info.episode) : null;
       const timeline = L.Timeline.view(info.hash, link);
       if (movie.runtime) timeline.duration = movie.runtime * 60;
@@ -1044,22 +1119,38 @@
   var current = null;
   var isBusy = () => !!current;
   var playingId = null;
-  function isWatchedIn(movie) {
+  function timelineOf(movie) {
     const L = lampa();
     const title = movie.original_title || movie.original_name || "";
     return (season, episode) => {
       const hash = L.Utils.hash(timelineHashString(season, episode, title));
-      const view = L.Timeline.view(hash, L.Timeline.link(movie, season, episode));
-      return !!view && view.percent >= WATCHED_PERCENT;
+      return L.Timeline.view(hash, L.Timeline.link(movie, season, episode));
     };
   }
+  function isWatchedIn(movie) {
+    const view = timelineOf(movie);
+    return (season, episode) => {
+      const v = view(season, episode);
+      return !!v && v.percent >= WATCHED_PERCENT;
+    };
+  }
+  function dropUnlessPreloaded(hash) {
+    if (!hash) return;
+    if (store.preload.all().some((e) => e && e.hash === hash)) return;
+    lampa().Torserver.drop(hash);
+  }
   async function resolveTarget(card) {
-    const kind = detectKind(card);
-    const { movie, details } = await fullCard(card, kind);
-    if (kind === "movie") return { kind, ctx: { kind }, movie, tv: null };
+    const first = detectKind(card);
+    const { movie, details } = await fullCard(card, first);
+    if (first === "movie") return { kind: first, ctx: { kind: first }, movie, tv: null };
+    const kind = details && Array.isArray(details.genres) ? detectKind({
+      original_name: movie.original_name,
+      origin_country: details.origin_country || movie.origin_country,
+      genres: details.genres
+    }) : first;
     const seasons = details && details.seasons || card.seasons || [];
     const progress = store.progress.get(card.id);
-    let target = advanceWatched(nextEpisode(progress, seasons), seasons, isWatchedIn(movie));
+    let target = resumeTarget(progress, progress && timelineOf(movie)(progress.season, progress.episode)) || advanceWatched(nextEpisode(progress, seasons), seasons, isWatchedIn(movie));
     const status2 = details ? episodeStatus(details, todayIso()) : null;
     if (status2 && (target.season > status2.season || target.season === status2.season && target.episode > status2.aired)) {
       if (status2.aired >= 1) target = { season: status2.season, episode: status2.aired };
@@ -1091,14 +1182,11 @@
     const files = await pollFiles(job.hash, job);
     if (job.cancelled || !files) return "cancelled";
     const playlist = buildPlaylist(files, movie, job.hash);
-    const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx);
+    const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, playlist);
     const element = file && playlist.find((p) => p.id === file.id);
-    if (!element) {
-      console.log("lampa-home", "no file for", ctx, files.map((f) => f.path));
-      return "nofile";
-    }
+    if (!element) return "nofile";
     job.finish();
-    if (movie.id) L.Favorite.add("history", movie, 100);
+    if (movie.id) L.Favorite.add("history", { ...movie, genre_ids: genreIds(movie) }, 100);
     playingId = ctx.kind === "movie" ? null : card.id;
     const start3 = { ...element, playlist };
     L.Player.play(start3);
@@ -1112,9 +1200,7 @@
   async function run(card) {
     const L = lampa();
     if (!card || current) return;
-    const job = beginJob(MSG.search, (j) => {
-      if (j.hash) L.Torserver.drop(j.hash);
-    });
+    const job = beginJob(MSG.search, (j) => dropUnlessPreloaded(j.hash));
     const finish = job.finish;
     const kind = detectKind(card);
     let params = buildSearchParams(card, { kind }, storageField("parse_lang"));
@@ -1130,21 +1216,20 @@
         L.Noty.show(MSG.none);
         return openNativeList(params);
       }
-      console.log("lampa-home", "play", ctx, chosen.Title);
       if (!L.Torserver.url()) throw fail(MSG.noServer);
       L.Loading.setText(MSG.server);
       job.hash = await addTorrent(chosen, movie);
-      if (job.cancelled) return L.Torserver.drop(job.hash);
-      const outcome = await playFiles(job, card, movie, ctx);
+      if (job.cancelled) return dropUnlessPreloaded(job.hash);
+      const outcome = await playFiles(job, card, movie, { ...ctx, titleHasSeason: titleHasSeason(chosen.Title) });
       if (outcome === "nofile") {
-        L.Torserver.drop(job.hash);
+        dropUnlessPreloaded(job.hash);
         finish();
         L.Noty.show(MSG.noFile);
         return openNativeList(params);
       }
     } catch (err) {
       if (job.cancelled) return;
-      if (job.hash) L.Torserver.drop(job.hash);
+      dropUnlessPreloaded(job.hash);
       finish();
       const msg = err instanceof PlayError ? err.message : MSG.unknown;
       if (!(err instanceof PlayError)) console.error("lampa-home play", err);
@@ -1152,7 +1237,7 @@
       openNativeList(params);
     }
   }
-  async function startFromHash(hash, card, ctx) {
+  async function startFromHash(hash, card, ctx, title) {
     const L = lampa();
     if (!hash || !card || current) return;
     const job = beginJob(MSG.files, () => {
@@ -1160,9 +1245,13 @@
     job.hash = hash;
     try {
       if (!L.Torserver.url()) throw fail(MSG.noServer);
-      let movie = card;
+      const kind = ctx && ctx.kind || detectKind(card);
+      let movie = normalizeTitles(card);
       if (!movie.img && movie.poster_path) movie = { ...movie, img: L.Api.img(movie.poster_path) };
-      const outcome = await playFiles(job, card, movie, { kind: detectKind(card), ...ctx });
+      if (kind !== "movie" && !movie.number_of_seasons) {
+        movie = { ...movie, number_of_seasons: Math.max(1, ctx && ctx.season || 1) };
+      }
+      const outcome = await playFiles(job, card, movie, { kind, ...ctx, titleHasSeason: titleHasSeason(title) });
       if (outcome === "nofile") {
         job.finish();
         L.Noty.show(MSG.noFile);
@@ -1536,6 +1625,14 @@
       params: { items: { view: 6 }, lh_row: row.rowKey }
     }));
   }
+  function fallbackToNative(err) {
+    const L = lampa();
+    console.error("lampa-home home", err);
+    L.Noty.show("Lampa Home: \u043E\u0448\u0438\u0431\u043A\u0430, \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E \u0448\u0442\u0430\u0442\u043D\u0443\u044E \u0433\u043B\u0430\u0432\u043D\u0443\u044E");
+    const active = L.Activity.active();
+    if (!active || active.component !== NAME2) return;
+    L.Activity.replace({ component: "main", title: L.Lang.translate("title_main") });
+  }
   function component2(object) {
     const L = lampa();
     const comp = L.Maker.make("Main", object);
@@ -1555,8 +1652,8 @@
             this.items.push(banner);
           }
           this.build(rows);
-        }).catch(() => {
-          if (!this.destroyed) this.empty();
+        }).catch((e) => {
+          if (!this.destroyed) fallbackToNative(e);
         });
       },
       onNext(resolve, reject) {
@@ -1630,7 +1727,10 @@
     removing: "\u0423\u0434\u0430\u043B\u044F\u044E \u0441 \u0434\u0438\u0441\u043A\u0430\u2026",
     replaced: "\u041F\u0440\u0435\u0436\u043D\u044F\u044F \u0437\u0430\u043A\u0430\u0447\u043A\u0430 \u0443\u0434\u0430\u043B\u0435\u043D\u0430",
     replaceFailed: "\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043D\u0430 \u041F\u041A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D: \u043F\u0440\u0435\u0436\u043D\u044F\u044F \u0437\u0430\u043A\u0430\u0447\u043A\u0430 \u043D\u0435 \u0443\u0434\u0430\u043B\u0435\u043D\u0430, \u043D\u043E\u0432\u0430\u044F \u043D\u0435 \u043D\u0430\u0447\u0430\u0442\u0430",
-    confirm: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441 \u0434\u0438\u0441\u043A\u0430?"
+    confirm: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441 \u0434\u0438\u0441\u043A\u0430?",
+    missing: "\u0423\u0434\u0430\u043B\u0435\u043D\u043E \u043D\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0435",
+    forget: "\u0423\u0431\u0440\u0430\u0442\u044C \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430",
+    forgotten: "\u0423\u0431\u0440\u0430\u043D\u043E \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430"
   };
   var SNAPSHOT_FIELDS = [
     "id",
@@ -1645,7 +1745,8 @@
     "origin_country",
     "release_date",
     "first_air_date",
-    "runtime"
+    "runtime",
+    "number_of_seasons"
   ];
   function preloadProgress({ loaded_size, file_stats, index }) {
     const file = (file_stats || []).find((f) => f.id === index);
@@ -1669,6 +1770,7 @@
   }
   function badgeLabel(progress) {
     if (!progress) return "";
+    if (progress.missing) return MSG2.missing;
     return progress.done ? "\u0421\u043A\u0430\u0447\u0430\u043D\u043E" : `\u041A\u0430\u0447\u0430\u0435\u0442\u0441\u044F ${progress.percent} %`;
   }
   var entryKey = (card) => (card.original_name || card.name ? "tv" : "movie") + ":" + card.id;
@@ -1698,7 +1800,11 @@
     } catch (e) {
       throw fail2(MSG2.torrserver);
     }
-    if (!res.ok) throw fail2(MSG2.torrserver);
+    if (!res.ok) {
+      const err = fail2(MSG2.torrserver);
+      err.status = res.status;
+      throw err;
+    }
     const text = await res.text();
     return text ? JSON.parse(text) : null;
   }
@@ -1787,7 +1893,7 @@
       L.Loading.setText(MSG2.files);
       const files = await waitFiles(hash, job);
       if (job.cancelled || !files) return;
-      const file = pickFile(files, ctx);
+      const file = pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(chosen.Title) }, fileInfos(files, movie));
       if (!file) throw fail2(MSG2.noFile);
       const key = entryKey(movie);
       const existing = store.preload.get(key);
@@ -1797,7 +1903,6 @@
         try {
           await helperDelete(existing.hash);
         } catch (e) {
-          console.log("lampa-home", "helper delete failed", e && e.message);
           throw fail2(MSG2.replaceFailed);
         }
         store.preload.remove(key);
@@ -1818,7 +1923,6 @@
         added: Date.now(),
         card: snapshot
       });
-      console.log("lampa-home", "preload", ctx, chosen.Title, hash, file.id);
       finish();
       L.Noty.show(replaced ? `${MSG2.replaced}. ${MSG2.started}` : MSG2.started);
     } catch (err) {
@@ -1830,7 +1934,13 @@
     }
   }
   async function status(hash, index) {
-    const json = await tsTorrents({ action: "get", hash });
+    let json;
+    try {
+      json = await tsTorrents({ action: "get", hash });
+    } catch (err) {
+      if (err && err.status === 404) return { loaded: 0, size: 0, percent: 0, done: false, missing: true };
+      throw err;
+    }
     const p = preloadProgress({ loaded_size: json && json.loaded_size, file_stats: json && json.file_stats, index });
     const file = (json && json.file_stats || []).find((f) => f.id === index);
     return { loaded: json && json.loaded_size || 0, size: file && file.length || 0, ...p };
@@ -1843,7 +1953,6 @@
     try {
       await helperDelete(entry.hash);
     } catch (e) {
-      console.log("lampa-home", "helper delete failed", e && e.message);
       L.Loading.stop();
       L.Noty.show(MSG2.helper);
       return false;
@@ -1852,6 +1961,10 @@
     store.preload.remove(cardId);
     L.Noty.show(MSG2.removed);
     return true;
+  }
+  function forget(cardId) {
+    store.preload.remove(cardId);
+    lampa().Noty.show(MSG2.forgotten);
   }
   var pollQueue = createQueue(2);
   function component3(object) {
@@ -1870,6 +1983,8 @@
       badges.forEach(({ el, entry }) => {
         pending++;
         pollQueue(() => status(entry.hash, entry.index)).then((p) => {
+          const state = badges.get(entry.cardId);
+          if (state) state.missing = !!p.missing;
           el.textContent = badgeLabel(p);
           el.classList.toggle("lh-dl-badge--done", p.done);
         }).catch(() => {
@@ -1879,19 +1994,44 @@
         });
       });
     }
-    function confirmRemove(cardId) {
+    const reload = () => {
+      if (isActive()) L.Activity.replace();
+    };
+    function ask(title, items, onPick) {
       const enabled = L.Controller.enabled().name;
       L.Select.show({
-        title: MSG2.confirm,
-        items: [{ title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C", remove: true }, { title: "\u041E\u0442\u043C\u0435\u043D\u0430" }],
+        title,
+        items: [...items, { title: "\u041E\u0442\u043C\u0435\u043D\u0430" }],
         onSelect: (a) => {
           L.Controller.toggle(enabled);
-          if (!a.remove) return;
-          remove(cardId).then((ok) => {
-            if (ok && isActive()) L.Activity.replace();
-          });
+          onPick(a);
         },
         onBack: () => L.Controller.toggle(enabled)
+      });
+    }
+    function offerForget(cardId) {
+      ask(MSG2.helper, [{ title: MSG2.forget, forget: true }], (a) => {
+        if (!a.forget) return;
+        forget(cardId);
+        reload();
+      });
+    }
+    function confirmRemove(cardId) {
+      const state = badges.get(cardId);
+      if (state && state.missing) {
+        ask(MSG2.missing, [{ title: MSG2.forget, forget: true }, { title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441 \u0434\u0438\u0441\u043A\u0430", remove: true }], (a) => {
+          if (a.forget) {
+            forget(cardId);
+            reload();
+          } else if (a.remove) {
+            remove(cardId).then((ok) => ok ? reload() : offerForget(cardId));
+          }
+        });
+        return;
+      }
+      ask(MSG2.confirm, [{ title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C", remove: true }], (a) => {
+        if (!a.remove) return;
+        remove(cardId).then((ok) => ok ? reload() : offerForget(cardId));
       });
     }
     comp.use({
@@ -1926,8 +2066,10 @@
             el.addEventListener("hover:long", guarded(comp, () => confirmRemove(entry.cardId)));
           },
           onEnter: guarded(comp, () => {
-            const { card, hash, index, kind, season, episode, absolute } = entry;
-            startFromHash(hash, card, { kind, season, episode, absolute, index });
+            const state = badges.get(entry.cardId);
+            if (state && state.missing) return confirmRemove(entry.cardId);
+            const { card, hash, index, kind, season, episode, absolute, title } = entry;
+            startFromHash(hash, card, { kind, season, episode, absolute, index }, title);
           }),
           onFocus() {
             L.Background.change(L.Utils.cardImgBackground(data));
@@ -2058,6 +2200,15 @@
     if (newItems.length > LIMITS.maxToasts) lines.push(`\u0438 \u0435\u0449\u0451 ${newItems.length - LIMITS.maxToasts}`);
     return lines;
   }
+  function candidateKind(card) {
+    if (!card || card.id == null || !card.original_name) return null;
+    if (detectKind(card) === "anime") return "anime";
+    const jp = (card.origin_country || []).includes("JP");
+    return jp && !genreIds(card).length ? "maybe" : null;
+  }
+  function confirmAnime(items) {
+    return items.filter(({ card, status: status2 }) => candidateKind(card) === "anime" || !!(status2 && status2.animation));
+  }
   function candidates() {
     const byId = /* @__PURE__ */ new Map();
     for (const type of ["history", "book"]) {
@@ -2068,18 +2219,19 @@
         list = [];
       }
       for (const card of list || []) {
-        if (card && card.id != null && !byId.has(card.id) && detectKind(card) === "anime") byId.set(card.id, card);
+        if (candidateKind(card) && !byId.has(card.id)) byId.set(card.id, card);
       }
     }
     return [...byId.values()];
   }
   async function checkNewEpisodes() {
-    const items = await Promise.all(
+    const loaded = await Promise.all(
       candidates().map((card) => tvStatus(card.id).then((status2) => ({ card, status: status2 }), () => ({ card, status: null })))
     );
+    const items = confirmAnime(loaded);
     const fresh = diffNewEpisodes(items, (id) => store.seen.get(id));
     for (const { card, status: status2 } of items) if (status2) store.seen.set(card.id, status2.aired);
-    return { fresh, learned: shouldMark(items) };
+    return { fresh, learned: shouldMark(loaded) };
   }
   function showSequential(lines) {
     lines.forEach((line, i) => setTimeout(() => lampa().Noty.show(line, { time: TOAST_MS }), i * TOAST_MS));
@@ -2093,7 +2245,7 @@
       store.notify.mark();
       showSequential(toastLines(fresh));
     } catch (e) {
-      console.log("lampa-home notify", e);
+      console.error("lampa-home notify", e);
     }
   }
   function start() {
@@ -2143,11 +2295,9 @@
   }
 
   // src/index.js
-  var PLUGIN = "lampa-home";
-  var VERSION = "0.1.0";
   function guard() {
     const L = window.Lampa;
-    return !!(L && L.Maker && L.Activity && L.Api && L.Api.sources && L.Api.sources.tmdb && L.Api.sources.tmdb.get && L.Parser && L.Torserver && L.Player && L.Loading);
+    return !!(L && L.Maker && L.Activity && L.Api && L.Api.sources && L.Api.sources.tmdb && L.Api.sources.tmdb.get && L.Parser && L.Torserver && L.Player && L.Loading && L.SettingsApi && L.Template && L.Select && L.Favorite && L.Menu);
   }
   function injectCss(text) {
     if (document.getElementById("lh-style")) return;
@@ -2156,18 +2306,28 @@
     style.textContent = text;
     document.head.appendChild(style);
   }
+  var STEPS = [
+    ["styles", () => injectCss(styles_default)],
+    ["storage", () => store.prune()],
+    ["templates", () => register2()],
+    ["settings", () => register5()],
+    ["home", () => register3()],
+    ["catalog", () => register()],
+    ["downloads", () => register4()],
+    ["play", () => init()],
+    ["downloads-menu", () => init2()],
+    ["menu", () => init3()],
+    ["notify", () => start()]
+  ];
   function init4() {
-    injectCss(styles_default);
-    register2();
-    register5();
-    register3();
-    register();
-    register4();
-    init();
-    init2();
-    init3();
-    start();
-    console.log(PLUGIN, VERSION, "loaded");
+    for (const [name, step] of STEPS) {
+      try {
+        step();
+      } catch (e) {
+        console.error("lampa-home", name, e);
+        Lampa.Noty.show("Lampa Home: \u043E\u0448\u0438\u0431\u043A\u0430 \u043C\u043E\u0434\u0443\u043B\u044F " + name);
+      }
+    }
   }
   function start2() {
     if (!guard()) {
@@ -2176,8 +2336,7 @@
     }
     init4();
   }
-  if (window.lampa_home_ready) {
-  } else {
+  if (!window.lampa_home_ready) {
     window.lampa_home_ready = true;
     if (window.appready) start2();
     else Lampa.Listener.follow("app", (e) => {

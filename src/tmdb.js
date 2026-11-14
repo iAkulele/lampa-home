@@ -50,13 +50,15 @@ export function loadTv(tvId) {
 
 const tvQueue = createQueue(6);
 
-// Never rejects: resolves with {season, aired, total, airing} or null on failure.
+// Never rejects: resolves with {season, aired, total, airing, animation} or null on
+// failure. `animation`: the show has TMDB genre 16 (notify.js confirms anime by it).
 export function tvStatus(tvId, today = todayIso()) {
   const hit = store.tvcache.get(tvId);
   if (hit) return Promise.resolve(hit.status);
   return tvQueue(() => loadTv(tvId)).then(
     (json) => {
-      const status = episodeStatus(json, today);
+      const genres = (json && json.genres) || [];
+      const status = { ...episodeStatus(json, today), animation: genres.some((g) => g && g.id === 16) };
       store.tvcache.set(tvId, status);
       return status;
     },

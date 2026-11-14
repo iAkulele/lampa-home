@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { detectKind, pickFile, buildSearchParams, advanceWatched, timelineHashString } from '../src/play.js';
+import {
+  detectKind, pickFile, buildSearchParams, advanceWatched, timelineHashString, resumeTarget, normalizeTitles, titleHasSeason,
+} from '../src/play.js';
 
 const GiB = 1024 ** 3;
 
@@ -96,4 +98,73 @@ test('test_advance_watched_rolls_season', () => {
 test('test_timeline_hash_string_matches_lampa', () => {
   assert.strictEqual(timelineHashString(1, 4, 'The Boys'), '14The Boys');
   assert.strictEqual(timelineHashString(12, 3, 'One Piece'), '12:3One Piece');
+});
+
+test('test_detect_kind_prefers_genres_when_genre_ids_empty', () => {
+  // History cards may keep an empty genre_ids next to the full genres.
+  assert.strictEqual(detectKind({ original_name: 'Frieren', origin_country: ['JP'], genre_ids: [], genres: [{ id: 16, name: 'Анимация' }] }), 'anime');
+  assert.strictEqual(detectKind({ original_name: 'Frieren', origin_country: ['JP'], genres: [{ id: 10759 }, { id: 16 }] }), 'anime');
+  assert.strictEqual(detectKind({ original_name: 'Frieren', origin_country: ['JP'] }), 'tv');
+});
+
+test('test_pick_file_tv_season_pack_uses_in_season_number', () => {
+  // Breaking Bad «Сезон 2»: S1 has 7 episodes, so absolute S2E3 = 10.
+  const files = Array.from({ length: 13 }, (_, i) => ({
+    id: i + 1,
+    path: `Во все тяжкие Сезон 2/Серия ${String(i + 1).padStart(2, '0')}.mkv`,
+    length: GiB,
+  }));
+  const f = pickFile(files, { kind: 'tv', season: 2, episode: 3, absolute: 10 });
+  assert.strictEqual(f.path, 'Во все тяжкие Сезон 2/Серия 03.mkv');
+});
+
+test('test_pick_file_two_season_pack_never_picks_other_season', () => {
+  const files = [
+    { id: 1, path: 'Show/Season 1/Серия 5.mkv', length: GiB },
+    { id: 2, path: 'Show/Season 2/Серия 5.mkv', length: GiB },
+  ];
+  const ctx = { kind: 'tv', season: 2, episode: 5, absolute: 15 };
+  // Bare "5" matches both files: without Lampa's parse no guess is made.
+  assert.strictEqual(pickFile(files, ctx), null);
+  // Torserver.parse reads the season folders.
+  const infos = [{ id: 1, season: 1, episode: 5 }, { id: 2, season: 2, episode: 5 }];
+  assert.strictEqual(pickFile(files, ctx, infos).id, 2);
+});
+
+test('test_pick_file_anime_season_pack_per_season_numbering', () => {
+  // S1 had 12 episodes; the S2 pack is numbered 01..24 per season.
+  const files = Array.from({ length: 24 }, (_, i) => ({
+    id: i + 1,
+    path: `[Group] Anime S2/[Group] Anime - ${String(i + 1).padStart(2, '0')} [1080p].mkv`,
+    length: GiB,
+  }));
+  const ctx = { kind: 'anime', season: 2, episode: 2, absolute: 14 };
+  // The release title names the season: per-season number first.
+  assert.strictEqual(pickFile(files, { ...ctx, titleHasSeason: true }).id, 2);
+  // No season in the title: absolute numbering first (long-running shows).
+  assert.strictEqual(pickFile(files, { ...ctx, titleHasSeason: false }).id, 14);
+});
+
+test('test_title_has_season', () => {
+  assert.strictEqual(titleHasSeason('Attack on Titan Season 3 [1080p]'), true);
+  assert.strictEqual(titleHasSeason('Пацаны (4 сезон: 1-8 серии из 8)'), true);
+  assert.strictEqual(titleHasSeason('Show.S02.1080p'), true);
+  assert.strictEqual(titleHasSeason('[AniDub] One Piece [1090-1100]'), false);
+});
+
+test('test_resume_target_partly_watched', () => {
+  const progress = { season: 1, episode: 4 };
+  assert.deepStrictEqual(resumeTarget(progress, { time: 600, percent: 30 }), { season: 1, episode: 4 });
+  // Finished (>= 85 %) or never started: move on.
+  assert.strictEqual(resumeTarget(progress, { time: 2500, percent: 90 }), null);
+  assert.strictEqual(resumeTarget(progress, { time: 0, percent: 0 }), null);
+  assert.strictEqual(resumeTarget(null, { time: 600, percent: 30 }), null);
+  assert.strictEqual(resumeTarget(progress, null), null);
+});
+
+test('test_normalize_titles_for_timeline_hash', () => {
+  assert.deepStrictEqual(normalizeTitles({ id: 1, name: 'Пацаны', original_name: 'The Boys' }),
+    { id: 1, name: 'Пацаны', original_name: 'The Boys', title: 'Пацаны', original_title: 'The Boys' });
+  const movie = { id: 2, title: 'Дюна', original_title: 'Dune' };
+  assert.deepStrictEqual(normalizeTitles(movie), movie);
 });

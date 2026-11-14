@@ -1,7 +1,7 @@
 // Startup toasts: a watched anime got a new episode.
 import { lampa, store, favoriteGet, storageField } from './lampa.js';
 import { LIMITS } from './config.js';
-import { detectKind } from './play.js';
+import { detectKind, genreIds } from './play.js';
 import { tvStatus } from './tmdb.js';
 
 const TOAST_MS = 5000;
@@ -31,25 +31,40 @@ export function toastLines(newItems) {
   return lines;
 }
 
+// 'anime' (known by its genres), 'maybe' (a Japanese show saved without genres:
+// confirmed by the TV details) or null.
+export function candidateKind(card) {
+  if (!card || card.id == null || !card.original_name) return null;
+  if (detectKind(card) === 'anime') return 'anime';
+  const jp = (card.origin_country || []).includes('JP');
+  return jp && !genreIds(card).length ? 'maybe' : null;
+}
+
+// Keeps anime and those 'maybe' shows whose TMDB details have animation (16).
+export function confirmAnime(items) {
+  return items.filter(({ card, status }) => candidateKind(card) === 'anime' || !!(status && status.animation));
+}
+
 function candidates() {
   const byId = new Map();
   for (const type of ['history', 'book']) {
     let list = [];
     try { list = favoriteGet({ type }); } catch (e) { list = []; }
     for (const card of list || []) {
-      if (card && card.id != null && !byId.has(card.id) && detectKind(card) === 'anime') byId.set(card.id, card);
+      if (candidateKind(card) && !byId.has(card.id)) byId.set(card.id, card);
     }
   }
   return [...byId.values()];
 }
 
 export async function checkNewEpisodes() {
-  const items = await Promise.all(
+  const loaded = await Promise.all(
     candidates().map((card) => tvStatus(card.id).then((status) => ({ card, status }), () => ({ card, status: null }))),
   );
+  const items = confirmAnime(loaded);
   const fresh = diffNewEpisodes(items, (id) => store.seen.get(id));
   for (const { card, status } of items) if (status) store.seen.set(card.id, status.aired);
-  return { fresh, learned: shouldMark(items) };
+  return { fresh, learned: shouldMark(loaded) };
 }
 
 // Lampa's Noty shows one message at a time, so toasts go one after another.
@@ -66,7 +81,7 @@ async function check() {
     store.notify.mark();
     showSequential(toastLines(fresh));
   } catch (e) {
-    console.log('lampa-home notify', e);
+    console.error('lampa-home notify', e);
   }
 }
 
