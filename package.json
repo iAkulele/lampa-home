@@ -1,0 +1,15 @@
+{
+  "name": "lampa-home",
+  "version": "0.1.0",
+  "description": "Lampa plugin: home screen with curated rows",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/index.js --bundle --format=iife --target=es2019 --loader:.css=text --outfile=lampa-home.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "serve": "node dev/serve.js"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}

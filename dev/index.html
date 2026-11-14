@@ -1,0 +1,44 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lampa (dev stand)</title>
+
+    <link rel="stylesheet" href="/vender/scrollbar/jquery.scrollbar.css">
+    <link rel="stylesheet" href="/vender/keypad/style.css">
+
+    <link rel="stylesheet" href="/core/app.css">
+</head>
+<body>
+    <div class="welcome"></div>
+
+    <div id="app">
+
+    </div>
+
+    <script>
+        // Seed Lampa settings once, before app.js reads localStorage.
+        // Format as written by Lampa.Storage.set: objects as JSON, primitives as strings.
+        if (!localStorage.lh_dev_seeded) {
+            localStorage.setItem('plugins', JSON.stringify([{ url: 'http://127.0.0.1:8099/lampa-home.js', status: 1 }]));
+            localStorage.setItem('torrserver_url', 'http://192.168.31.7:8090');
+            localStorage.setItem('jackett_url', 'jacred.xyz');
+            localStorage.setItem('parser_use', 'true');
+            localStorage.setItem('parser_torrent_type', 'jackett');
+            localStorage.setItem('language', 'ru');
+            localStorage.setItem('tmdb_lang', 'ru');
+            localStorage.setItem('start_page', 'main');
+            localStorage.setItem('lh_dev_seeded', '1');
+        }
+    </script>
+
+    <script src="/vender/jquery/jquery.js"></script>
+    <script src="/vender/notify/notify.js"></script>
+    <script src="/vender/scrollbar/jquery.scrollbar.js"></script>
+    <script src="/vender/navigator/navigator.js"></script>
+    <script src="/vender/keypad/keypad.js"></script>
+
+    <script src="/core/app.js"></script>
+</body>
+</html>
