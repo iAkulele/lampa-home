@@ -3,11 +3,9 @@ import { lampa, store, favoriteGet, storageField } from './lampa.js';
 import { LIMITS } from './config.js';
 import { detectKind } from './play.js';
 import { tvStatus } from './tmdb.js';
-import { createQueue } from './queue.js';
 
 const TOAST_MS = 5000;
 const START_DELAY_MS = 3000;
-const IN_FLIGHT = 6;
 
 // items: [{card, status}]; new only if airing, seen before and aired grew.
 export function diffNewEpisodes(items, seenGetter) {
@@ -18,6 +16,11 @@ export function diffNewEpisodes(items, seenGetter) {
     if (seen != null && status.aired > seen) out.push({ id: card.id, aired: status.aired, card });
   }
   return out;
+}
+
+// Mark the check as done only if at least one status was actually learned.
+export function shouldMark(items) {
+  return items.some((i) => i.status);
 }
 
 export function toastLines(newItems) {
@@ -41,22 +44,27 @@ function candidates() {
 }
 
 export async function checkNewEpisodes() {
-  const run = createQueue(IN_FLIGHT);
   const items = await Promise.all(
-    candidates().map((card) => run(() => tvStatus(card.id)).then((status) => ({ card, status }), () => ({ card, status: null }))),
+    candidates().map((card) => tvStatus(card.id).then((status) => ({ card, status }), () => ({ card, status: null }))),
   );
   const fresh = diffNewEpisodes(items, (id) => store.seen.get(id));
   for (const { card, status } of items) if (status) store.seen.set(card.id, status.aired);
-  return fresh;
+  return { fresh, learned: shouldMark(items) };
+}
+
+// Lampa's Noty shows one message at a time, so toasts go one after another.
+function showSequential(lines) {
+  lines.forEach((line, i) => setTimeout(() => lampa().Noty.show(line, { time: TOAST_MS }), i * TOAST_MS));
 }
 
 async function check() {
   try {
     if (storageField('lh_notify') === false) return;
     if (!store.notify.due()) return;
-    const fresh = await checkNewEpisodes();
+    const { fresh, learned } = await checkNewEpisodes();
+    if (!learned) return;
     store.notify.mark();
-    for (const line of toastLines(fresh)) lampa().Noty.show(line, { time: TOAST_MS });
+    showSequential(toastLines(fresh));
   } catch (e) {
     console.log('lampa-home notify', e);
   }

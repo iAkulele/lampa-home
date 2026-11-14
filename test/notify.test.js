@@ -29,3 +29,10 @@ test('test_toast_lines_limit_three_plus_more', () => {
   assert.strictEqual(five[3], 'и ещё 2');
   assert.deepStrictEqual(toastLines([]), []);
 });
+
+test('test_should_mark_only_when_a_status_arrived', async () => {
+  const { shouldMark } = await import('../src/notify.js');
+  assert.strictEqual(shouldMark([]), false);
+  assert.strictEqual(shouldMark([{ status: null }, { status: null }]), false);
+  assert.strictEqual(shouldMark([{ status: null }, { status: { airing: false, aired: 1 } }]), true);
+});

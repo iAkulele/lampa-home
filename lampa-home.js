@@ -1511,7 +1511,6 @@
   // src/notify.js
   var TOAST_MS = 5e3;
   var START_DELAY_MS = 3e3;
-  var IN_FLIGHT = 6;
   function diffNewEpisodes(items, seenGetter) {
     const out = [];
     for (const { card, status } of items) {
@@ -1520,6 +1519,9 @@
       if (seen != null && status.aired > seen) out.push({ id: card.id, aired: status.aired, card });
     }
     return out;
+  }
+  function shouldMark(items) {
+    return items.some((i) => i.status);
   }
   function toastLines(newItems) {
     const lines = newItems.slice(0, LIMITS.maxToasts).map((n) => `\u0412\u044B\u0448\u043B\u0430 ${n.aired} \u0441\u0435\u0440\u0438\u044F: ${n.card.name || n.card.original_name || ""}`);
@@ -1542,21 +1544,24 @@
     return [...byId.values()];
   }
   async function checkNewEpisodes() {
-    const run2 = createQueue(IN_FLIGHT);
     const items = await Promise.all(
-      candidates().map((card) => run2(() => tvStatus(card.id)).then((status) => ({ card, status }), () => ({ card, status: null })))
+      candidates().map((card) => tvStatus(card.id).then((status) => ({ card, status }), () => ({ card, status: null })))
     );
     const fresh = diffNewEpisodes(items, (id) => store.seen.get(id));
     for (const { card, status } of items) if (status) store.seen.set(card.id, status.aired);
-    return fresh;
+    return { fresh, learned: shouldMark(items) };
+  }
+  function showSequential(lines) {
+    lines.forEach((line, i) => setTimeout(() => lampa().Noty.show(line, { time: TOAST_MS }), i * TOAST_MS));
   }
   async function check() {
     try {
       if (storageField("lh_notify") === false) return;
       if (!store.notify.due()) return;
-      const fresh = await checkNewEpisodes();
+      const { fresh, learned } = await checkNewEpisodes();
+      if (!learned) return;
       store.notify.mark();
-      for (const line of toastLines(fresh)) lampa().Noty.show(line, { time: TOAST_MS });
+      showSequential(toastLines(fresh));
     } catch (e) {
       console.log("lampa-home notify", e);
     }
