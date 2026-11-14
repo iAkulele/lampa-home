@@ -185,3 +185,24 @@
   background-color: #fff;
   color: #000;
 }
+
+/* «Скачанное»: the catalog grid without chips; progress badge on each card. */
+.lh-downloads .scroll__body {
+  padding-top: 1em;
+}
+.lh-downloads .lh-dl-badge {
+  position: absolute;
+  top: 0.4em;
+  left: 0.4em;
+  background: rgba(20, 20, 20, 0.85);
+  border: 1px solid #555;
+  color: #fff;
+  font-size: 0.8em;
+  padding: 0.1em 0.4em;
+  border-radius: 0.2em;
+  z-index: 2;
+}
+.lh-downloads .lh-dl-badge--done {
+  background: #1e7a34;
+  border-color: #2fa84a;
+}

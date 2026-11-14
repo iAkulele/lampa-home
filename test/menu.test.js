@@ -22,7 +22,7 @@ test('test_other_activities_and_none_are_left_alone', () => {
 });
 
 test('test_should_hide_keeps_allowed_actions', () => {
-  for (const a of ['main', 'movie', 'tv', 'cartoon', 'anime', 'settings']) {
+  for (const a of ['main', 'movie', 'tv', 'cartoon', 'anime', 'settings', 'lh_downloads']) {
     assert.strictEqual(shouldHide(a), false, a);
   }
   for (const a of ['feed', 'myperson', 'catalog', 'filter', 'relise', 'favorite', 'history', 'subscribes', 'timetable', 'mytorrents', 'about', 'console', 'edit']) {

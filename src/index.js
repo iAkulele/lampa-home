@@ -6,10 +6,11 @@ import * as templates from './templates.js';
 import * as play from './play.js';
 import * as notify from './notify.js';
 import * as settings from './settings.js';
+import * as downloads from './downloads.js';
 
 const PLUGIN = 'lampa-home', VERSION = '0.1.0';
 function guard(){ const L = window.Lampa; return !!(L && L.Maker && L.Activity && L.Api && L.Api.sources && L.Api.sources.tmdb && L.Api.sources.tmdb.get && L.Parser && L.Torserver && L.Player && L.Loading); }
 function injectCss(text){ if(document.getElementById('lh-style')) return; const style = document.createElement('style'); style.id = 'lh-style'; style.textContent = text; document.head.appendChild(style); }
-function init(){ injectCss(css); templates.register(); settings.register(); home.register(); catalog.register(); play.init(); menu.init(); notify.start(); console.log(PLUGIN, VERSION, 'loaded'); }
+function init(){ injectCss(css); templates.register(); settings.register(); home.register(); catalog.register(); downloads.register(); play.init(); downloads.init(); menu.init(); notify.start(); console.log(PLUGIN, VERSION, 'loaded'); }
 function start(){ if(!guard()){ Lampa.Noty.show('Lampa Home: несовместимая версия Lampa'); return; } init(); }
 if(window.lampa_home_ready) {} else { window.lampa_home_ready = true; if(window.appready) start(); else Lampa.Listener.follow('app', e => { if(e.type == 'ready') start(); }); }

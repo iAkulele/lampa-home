@@ -140,7 +140,7 @@ async function fullCard(card, kind) {
   return { movie, details };
 }
 
-function searchTorrents(params) {
+export function searchTorrents(params) {
   const L = lampa();
   const req = new Promise((resolve, reject) => {
     L.Parser.get(params, (data) => resolve((data && data.Results) || []), () => reject(fail(MSG.parser)));
@@ -243,43 +243,88 @@ function isWatchedIn(movie) {
   };
 }
 
-export async function run(card) {
+// What to play for a card: kind, the full card (movie) and, for series, the next
+// episode (ctx) and the TMDB details (tv). Shared by «Играть» and «Скачать заранее».
+export async function resolveTarget(card) {
+  const kind = detectKind(card);
+  const { movie, details } = await fullCard(card, kind);
+  if (kind === 'movie') return { kind, ctx: { kind }, movie, tv: null };
+  const seasons = (details && details.seasons) || card.seasons || [];
+  const progress = store.progress.get(card.id);
+  // Lampa's own marks win: skip episodes its timeline already has as watched
+  // (an external player auto-advancing E1 -> E2 -> E3 reports them there).
+  let target = advanceWatched(nextEpisode(progress, seasons), seasons, isWatchedIn(movie));
+  // TMDB counts announced episodes too: never go past the last aired one.
+  const status = details ? episodeStatus(details, todayIso()) : null;
+  if (status && (target.season > status.season || (target.season === status.season && target.episode > status.aired))) {
+    if (status.aired >= 1) target = { season: status.season, episode: status.aired };
+    else if (progress) target = { season: progress.season, episode: progress.episode };
+  }
+  const ctx = { kind, season: target.season, episode: target.episode, absolute: absoluteEpisode(seasons, target.season, target.episode) };
+  return { kind, ctx, movie, tv: details };
+}
+
+// One play attempt at a time; Back on the loader cancels it (onCancel runs first).
+function beginJob(text, onCancel) {
   const L = lampa();
-  if (!card || current) return;
+  if (current) return null;
   const job = { cancelled: false, timer: null, hash: null };
   current = job;
-
-  const finish = () => {
+  job.finish = () => {
     if (job.timer) clearInterval(job.timer);
     if (current === job) current = null;
     L.Loading.stop();
   };
   L.Loading.start(() => {
     job.cancelled = true;
-    if (job.hash) L.Torserver.drop(job.hash);
-    finish();
-  }, MSG.search);
+    onCancel(job);
+    job.finish();
+  }, text);
+  return job;
+}
+
+// Waits for the torrent's files, picks the one to start (ctx.index wins when
+// known) and starts the player. Returns 'played', 'cancelled' or 'nofile'.
+async function playFiles(job, card, movie, ctx) {
+  const L = lampa();
+  L.Loading.setText(MSG.files);
+  const files = await pollFiles(job.hash, job);
+  if (job.cancelled || !files) return 'cancelled';
+
+  const playlist = buildPlaylist(files, movie, job.hash);
+  const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx);
+  const element = file && playlist.find((p) => p.id === file.id);
+  if (!element) {
+    console.log('lampa-home', 'no file for', ctx, files.map((f) => f.path));
+    return 'nofile';
+  }
+
+  job.finish();
+  if (movie.id) L.Favorite.add('history', movie, 100);
+  playingId = ctx.kind === 'movie' ? null : card.id;
+  const start = { ...element, playlist };
+  L.Player.play(start);
+  L.Player.playlist(playlist);
+  L.Player.callback(() => L.Controller.toggle('content'));
+  if (ctx.kind !== 'movie') {
+    store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: job.hash });
+  }
+  return 'played';
+}
+
+export async function run(card) {
+  const L = lampa();
+  if (!card || current) return;
+  const job = beginJob(MSG.search, (j) => {
+    if (j.hash) L.Torserver.drop(j.hash);
+  });
+  const finish = job.finish;
 
   const kind = detectKind(card);
   let params = buildSearchParams(card, { kind }, storageField('parse_lang'));
   try {
-    const { movie, details } = await fullCard(card, kind);
+    const { movie, ctx } = await resolveTarget(card);
     if (job.cancelled) return;
-    let ctx = { kind };
-    if (kind !== 'movie') {
-      const seasons = (details && details.seasons) || card.seasons || [];
-      const progress = store.progress.get(card.id);
-      // Lampa's own marks win: skip episodes its timeline already has as watched
-      // (an external player auto-advancing E1 -> E2 -> E3 reports them there).
-      let target = advanceWatched(nextEpisode(progress, seasons), seasons, isWatchedIn(movie));
-      // TMDB counts announced episodes too: never go past the last aired one.
-      const status = details ? episodeStatus(details, todayIso()) : null;
-      if (status && (target.season > status.season || (target.season === status.season && target.episode > status.aired))) {
-        if (status.aired >= 1) target = { season: status.season, episode: status.aired };
-        else if (progress) target = { season: progress.season, episode: progress.episode };
-      }
-      ctx = { kind, season: target.season, episode: target.episode, absolute: absoluteEpisode(seasons, target.season, target.episode) };
-    }
     params = buildSearchParams(movie, ctx, storageField('parse_lang'));
 
     const results = await searchTorrents(params);
@@ -296,30 +341,12 @@ export async function run(card) {
     L.Loading.setText(MSG.server);
     job.hash = await addTorrent(chosen, movie);
     if (job.cancelled) return L.Torserver.drop(job.hash);
-    L.Loading.setText(MSG.files);
-    const files = await pollFiles(job.hash, job);
-    if (job.cancelled || !files) return;
-
-    const playlist = buildPlaylist(files, movie, job.hash);
-    const file = pickFile(files, ctx);
-    const element = file && playlist.find((p) => p.id === file.id);
-    if (!element) {
-      console.log('lampa-home', 'no file for', ctx, files.map((f) => f.path));
+    const outcome = await playFiles(job, card, movie, ctx);
+    if (outcome === 'nofile') {
       L.Torserver.drop(job.hash);
       finish();
       L.Noty.show(MSG.noFile);
       return openNativeList(params);
-    }
-
-    finish();
-    if (movie.id) L.Favorite.add('history', movie, 100);
-    playingId = kind === 'movie' ? null : card.id;
-    const start = { ...element, playlist };
-    L.Player.play(start);
-    L.Player.playlist(playlist);
-    L.Player.callback(() => L.Controller.toggle('content'));
-    if (kind !== 'movie') {
-      store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: job.hash });
     }
   } catch (err) {
     if (job.cancelled) return;
@@ -329,6 +356,30 @@ export async function run(card) {
     if (!(err instanceof PlayError)) console.error('lampa-home play', err);
     L.Noty.show(msg);
     openNativeList(params);
+  }
+}
+
+// Plays a torrent already in TorrServer (a pre-downloaded one) without searching.
+// ctx: {kind, season, episode, absolute, index}. Nothing is dropped from the server.
+export async function startFromHash(hash, card, ctx) {
+  const L = lampa();
+  if (!hash || !card || current) return;
+  const job = beginJob(MSG.files, () => {});
+  job.hash = hash;
+  try {
+    if (!L.Torserver.url()) throw fail(MSG.noServer);
+    let movie = card;
+    if (!movie.img && movie.poster_path) movie = { ...movie, img: L.Api.img(movie.poster_path) };
+    const outcome = await playFiles(job, card, movie, { kind: detectKind(card), ...ctx });
+    if (outcome === 'nofile') {
+      job.finish();
+      L.Noty.show(MSG.noFile);
+    }
+  } catch (err) {
+    if (job.cancelled) return;
+    job.finish();
+    if (!(err instanceof PlayError)) console.error('lampa-home play', err);
+    L.Noty.show(err instanceof PlayError ? err.message : MSG.unknown);
   }
 }
 

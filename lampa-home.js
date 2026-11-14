@@ -187,6 +187,27 @@
   background-color: #fff;
   color: #000;
 }
+
+/* \xAB\u0421\u043A\u0430\u0447\u0430\u043D\u043D\u043E\u0435\xBB: the catalog grid without chips; progress badge on each card. */
+.lh-downloads .scroll__body {
+  padding-top: 1em;
+}
+.lh-downloads .lh-dl-badge {
+  position: absolute;
+  top: 0.4em;
+  left: 0.4em;
+  background: rgba(20, 20, 20, 0.85);
+  border: 1px solid #555;
+  color: #fff;
+  font-size: 0.8em;
+  padding: 0.1em 0.4em;
+  border-radius: 0.2em;
+  z-index: 2;
+}
+.lh-downloads .lh-dl-badge--done {
+  background: #1e7a34;
+  border-color: #2fa84a;
+}
 `;
 
   // src/config.js
@@ -275,9 +296,9 @@
         if (!e || now() - e.checked > LIMITS.tvCacheMs) return null;
         return e;
       },
-      set(tvId, status) {
+      set(tvId, status2) {
         const all = read(STORAGE_KEYS.tvcache);
-        all[tvId] = { status, checked: now() };
+        all[tvId] = { status: status2, checked: now() };
         storage2.set(STORAGE_KEYS.tvcache, all);
       }
     };
@@ -301,7 +322,7 @@
         storage2.set(STORAGE_KEYS.filters, all);
       }
     };
-    const preload = {
+    const preload2 = {
       get(cardId) {
         return read(STORAGE_KEYS.preload)[cardId] || null;
       },
@@ -334,7 +355,7 @@
       trim(STORAGE_KEYS.progress, "updated");
       trim(STORAGE_KEYS.tvcache, "checked");
     }
-    return { progress, seen, tvcache, notify, filters, preload, prune };
+    return { progress, seen, tvcache, notify, filters, preload: preload2, prune };
   }
 
   // src/lampa.js
@@ -343,7 +364,7 @@
     set: (key, value) => window.Lampa.Storage.set(key, value)
   };
   var noty = (text) => window.Lampa.Noty.show(text);
-  var tmdbGet = (url, params, ok, fail2) => window.Lampa.Api.sources.tmdb.get(url, params, ok, fail2);
+  var tmdbGet = (url, params, ok, fail3) => window.Lampa.Api.sources.tmdb.get(url, params, ok, fail3);
   var favoriteGet = (params) => window.Lampa.Favorite.get(params) || [];
   var lampa = () => window.Lampa;
   var store = createStore(storage);
@@ -759,20 +780,20 @@
     }
     return out;
   }
-  function badgeText(status) {
-    return `${status.aired} \u0438\u0437 ${status.total}`;
+  function badgeText(status2) {
+    return `${status2.aired} \u0438\u0437 ${status2.total}`;
   }
   function applyPosterClass(cardEl, cardData) {
     if (!cardEl || !cardData || !cardData.lh_poster_fallback) return;
     cardEl.classList.add("lh-card--poster");
   }
-  function applyBadge(cardEl, status) {
-    if (!cardEl || !status || !status.total) return;
+  function applyBadge(cardEl, status2) {
+    if (!cardEl || !status2 || !status2.total) return;
     const view = cardEl.querySelector(".card__view");
     if (!view || view.querySelector(".lh-badge")) return;
     const el = document.createElement("div");
     el.className = "lh-badge";
-    el.textContent = badgeText(status);
+    el.textContent = badgeText(status2);
     view.appendChild(el);
   }
   function pickBannerCard(cards, random, rnd = Math.random) {
@@ -823,9 +844,9 @@
     if (hit) return Promise.resolve(hit.status);
     return tvQueue(() => loadTv(tvId)).then(
       (json) => {
-        const status = episodeStatus(json, today);
-        store.tvcache.set(tvId, status);
-        return status;
+        const status2 = episodeStatus(json, today);
+        store.tvcache.set(tvId, status2);
+        return status2;
       },
       () => null
     );
@@ -1032,38 +1053,74 @@
       return !!view && view.percent >= WATCHED_PERCENT;
     };
   }
-  async function run(card) {
+  async function resolveTarget(card) {
+    const kind = detectKind(card);
+    const { movie, details } = await fullCard(card, kind);
+    if (kind === "movie") return { kind, ctx: { kind }, movie, tv: null };
+    const seasons = details && details.seasons || card.seasons || [];
+    const progress = store.progress.get(card.id);
+    let target = advanceWatched(nextEpisode(progress, seasons), seasons, isWatchedIn(movie));
+    const status2 = details ? episodeStatus(details, todayIso()) : null;
+    if (status2 && (target.season > status2.season || target.season === status2.season && target.episode > status2.aired)) {
+      if (status2.aired >= 1) target = { season: status2.season, episode: status2.aired };
+      else if (progress) target = { season: progress.season, episode: progress.episode };
+    }
+    const ctx = { kind, season: target.season, episode: target.episode, absolute: absoluteEpisode(seasons, target.season, target.episode) };
+    return { kind, ctx, movie, tv: details };
+  }
+  function beginJob(text, onCancel) {
     const L = lampa();
-    if (!card || current) return;
+    if (current) return null;
     const job = { cancelled: false, timer: null, hash: null };
     current = job;
-    const finish = () => {
+    job.finish = () => {
       if (job.timer) clearInterval(job.timer);
       if (current === job) current = null;
       L.Loading.stop();
     };
     L.Loading.start(() => {
       job.cancelled = true;
-      if (job.hash) L.Torserver.drop(job.hash);
-      finish();
-    }, MSG.search);
+      onCancel(job);
+      job.finish();
+    }, text);
+    return job;
+  }
+  async function playFiles(job, card, movie, ctx) {
+    const L = lampa();
+    L.Loading.setText(MSG.files);
+    const files = await pollFiles(job.hash, job);
+    if (job.cancelled || !files) return "cancelled";
+    const playlist = buildPlaylist(files, movie, job.hash);
+    const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx);
+    const element = file && playlist.find((p) => p.id === file.id);
+    if (!element) {
+      console.log("lampa-home", "no file for", ctx, files.map((f) => f.path));
+      return "nofile";
+    }
+    job.finish();
+    if (movie.id) L.Favorite.add("history", movie, 100);
+    playingId = ctx.kind === "movie" ? null : card.id;
+    const start3 = { ...element, playlist };
+    L.Player.play(start3);
+    L.Player.playlist(playlist);
+    L.Player.callback(() => L.Controller.toggle("content"));
+    if (ctx.kind !== "movie") {
+      store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: job.hash });
+    }
+    return "played";
+  }
+  async function run(card) {
+    const L = lampa();
+    if (!card || current) return;
+    const job = beginJob(MSG.search, (j) => {
+      if (j.hash) L.Torserver.drop(j.hash);
+    });
+    const finish = job.finish;
     const kind = detectKind(card);
     let params = buildSearchParams(card, { kind }, storageField("parse_lang"));
     try {
-      const { movie, details } = await fullCard(card, kind);
+      const { movie, ctx } = await resolveTarget(card);
       if (job.cancelled) return;
-      let ctx = { kind };
-      if (kind !== "movie") {
-        const seasons = details && details.seasons || card.seasons || [];
-        const progress = store.progress.get(card.id);
-        let target = advanceWatched(nextEpisode(progress, seasons), seasons, isWatchedIn(movie));
-        const status = details ? episodeStatus(details, todayIso()) : null;
-        if (status && (target.season > status.season || target.season === status.season && target.episode > status.aired)) {
-          if (status.aired >= 1) target = { season: status.season, episode: status.aired };
-          else if (progress) target = { season: progress.season, episode: progress.episode };
-        }
-        ctx = { kind, season: target.season, episode: target.episode, absolute: absoluteEpisode(seasons, target.season, target.episode) };
-      }
       params = buildSearchParams(movie, ctx, storageField("parse_lang"));
       const results = await searchTorrents(params);
       if (job.cancelled) return;
@@ -1078,28 +1135,12 @@
       L.Loading.setText(MSG.server);
       job.hash = await addTorrent(chosen, movie);
       if (job.cancelled) return L.Torserver.drop(job.hash);
-      L.Loading.setText(MSG.files);
-      const files = await pollFiles(job.hash, job);
-      if (job.cancelled || !files) return;
-      const playlist = buildPlaylist(files, movie, job.hash);
-      const file = pickFile(files, ctx);
-      const element = file && playlist.find((p) => p.id === file.id);
-      if (!element) {
-        console.log("lampa-home", "no file for", ctx, files.map((f) => f.path));
+      const outcome = await playFiles(job, card, movie, ctx);
+      if (outcome === "nofile") {
         L.Torserver.drop(job.hash);
         finish();
         L.Noty.show(MSG.noFile);
         return openNativeList(params);
-      }
-      finish();
-      if (movie.id) L.Favorite.add("history", movie, 100);
-      playingId = kind === "movie" ? null : card.id;
-      const start3 = { ...element, playlist };
-      L.Player.play(start3);
-      L.Player.playlist(playlist);
-      L.Player.callback(() => L.Controller.toggle("content"));
-      if (kind !== "movie") {
-        store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: job.hash });
       }
     } catch (err) {
       if (job.cancelled) return;
@@ -1109,6 +1150,28 @@
       if (!(err instanceof PlayError)) console.error("lampa-home play", err);
       L.Noty.show(msg);
       openNativeList(params);
+    }
+  }
+  async function startFromHash(hash, card, ctx) {
+    const L = lampa();
+    if (!hash || !card || current) return;
+    const job = beginJob(MSG.files, () => {
+    });
+    job.hash = hash;
+    try {
+      if (!L.Torserver.url()) throw fail(MSG.noServer);
+      let movie = card;
+      if (!movie.img && movie.poster_path) movie = { ...movie, img: L.Api.img(movie.poster_path) };
+      const outcome = await playFiles(job, card, movie, { kind: detectKind(card), ...ctx });
+      if (outcome === "nofile") {
+        job.finish();
+        L.Noty.show(MSG.noFile);
+      }
+    } catch (err) {
+      if (job.cancelled) return;
+      job.finish();
+      if (!(err instanceof PlayError)) console.error("lampa-home play", err);
+      L.Noty.show(err instanceof PlayError ? err.message : MSG.unknown);
     }
   }
   function addButton(e) {
@@ -1197,7 +1260,7 @@
   };
   var move = (dir) => nav().move(dir);
   var EXTRA_PAGES = 3;
-  function load(object, kind, f, page, seen, ok, fail2, extra = EXTRA_PAGES) {
+  function load(object, kind, f, page, seen, ok, fail3, extra = EXTRA_PAGES) {
     const q = catalogQuery(kind, f, page, todayIso());
     tmdbGet(
       q.url,
@@ -1207,12 +1270,12 @@
         const total = json && json.total_pages || 1;
         if (!results.length && extra > 0 && page < total) {
           object.page = page + 1;
-          load(object, kind, f, page + 1, seen, ok, fail2, extra - 1);
+          load(object, kind, f, page + 1, seen, ok, fail3, extra - 1);
           return;
         }
         ok({ ...json, results });
       },
-      fail2
+      fail3
     );
   }
   function component(object) {
@@ -1514,8 +1577,8 @@
               onVisible() {
                 if (this.lhBadged || !wantsBadge(rowKey, cardData)) return;
                 this.lhBadged = true;
-                tvStatus(cardData.id, todayIso()).then((status) => {
-                  if (!this.destroyed) applyBadge(card.render(true), status);
+                tvStatus(cardData.id, todayIso()).then((status2) => {
+                  if (!this.destroyed) applyBadge(card.render(true), status2);
                 });
               },
               onDestroy() {
@@ -1540,9 +1603,316 @@
   var COMPONENT = NAME2;
   var HOME_TITLE = TITLE;
 
+  // src/downloads.js
+  var NAME3 = "lh_downloads";
+  var TITLE2 = "\u0421\u043A\u0430\u0447\u0430\u043D\u043D\u043E\u0435";
+  var HELPER_DEFAULT = "http://192.168.31.7:8091";
+  var COLS2 = 4;
+  var POLL_MS = 5e3;
+  var FILES_EVERY_MS2 = 2e3;
+  var FILES_TRIES2 = 30;
+  var PRELOAD_ABORT_MS = 3e3;
+  var MSG2 = {
+    search: "\u0418\u0449\u0443 \u0440\u0430\u0437\u0434\u0430\u0447\u0443\u2026",
+    server: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u0432 TorrServer\u2026",
+    files: "\u0416\u0434\u0443 \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432\u2026",
+    started: "\u0417\u0430\u043A\u0430\u0447\u043A\u0430 \u043D\u0430\u0447\u0430\u0442\u0430",
+    none: "\u041F\u043E\u0434\u0445\u043E\u0434\u044F\u0449\u0435\u0439 \u0440\u0430\u0437\u0434\u0430\u0447\u0438 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B",
+    noFile: "\u041D\u0443\u0436\u043D\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0435 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B",
+    parser: "\u041F\u0430\u0440\u0441\u0435\u0440 \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B",
+    noServer: "TorrServer \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D",
+    torrserver: "TorrServer \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
+    noFiles: "TorrServer \u043D\u0435 \u043F\u043E\u043B\u0443\u0447\u0438\u043B \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432",
+    helper: "\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043D\u0430 \u041F\u041A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
+    removed: "\u0423\u0434\u0430\u043B\u0435\u043D\u043E \u0441 \u0434\u0438\u0441\u043A\u0430",
+    confirm: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441 \u0434\u0438\u0441\u043A\u0430?"
+  };
+  var SNAPSHOT_FIELDS = [
+    "id",
+    "title",
+    "name",
+    "original_title",
+    "original_name",
+    "original_language",
+    "backdrop_path",
+    "poster_path",
+    "genre_ids",
+    "origin_country",
+    "release_date",
+    "first_air_date",
+    "runtime"
+  ];
+  function preloadProgress({ loaded_size, file_stats, index }) {
+    const file = (file_stats || []).find((f) => f.id === index);
+    const size = file && file.length || 0;
+    const loaded = loaded_size || 0;
+    if (!size) return { percent: 0, done: false };
+    const done = loaded >= size;
+    return { percent: done ? 100 : Math.min(99, Math.floor(loaded / size * 100)), done };
+  }
+  function cardSnapshot(card) {
+    const out = {};
+    for (const key of SNAPSHOT_FIELDS) {
+      if (card[key] !== void 0 && card[key] !== null) out[key] = card[key];
+    }
+    if (!out.genre_ids && Array.isArray(card.genres)) out.genre_ids = card.genres.map((g) => g && g.id).filter((id) => id != null);
+    return out;
+  }
+  function badgeLabel(progress) {
+    if (!progress) return "";
+    return progress.done ? "\u0421\u043A\u0430\u0447\u0430\u043D\u043E" : `\u041A\u0430\u0447\u0430\u0435\u0442\u0441\u044F ${progress.percent} %`;
+  }
+  var entryKey = (card) => (card.original_name || card.name ? "tv" : "movie") + ":" + card.id;
+  var DlError = class extends Error {
+  };
+  var fail2 = (msg) => new DlError(msg);
+  function tsBase() {
+    const L = lampa();
+    const url = L.Torserver.url();
+    if (!url) throw fail2(MSG2.noServer);
+    return url.replace(/\/+$/, "");
+  }
+  function tsHeaders() {
+    const L = lampa();
+    const headers = { "Content-Type": "application/json" };
+    if (storageField("torrserver_auth")) {
+      headers.Authorization = "Basic " + btoa(unescape(encodeURIComponent(
+        L.Storage.get("torrserver_login", "") + ":" + L.Storage.get("torrserver_password", "")
+      )));
+    }
+    return headers;
+  }
+  async function tsTorrents(body) {
+    let res;
+    try {
+      res = await fetch(tsBase() + "/torrents", { method: "POST", headers: tsHeaders(), body: JSON.stringify(body) });
+    } catch (e) {
+      throw fail2(MSG2.torrserver);
+    }
+    if (!res.ok) throw fail2(MSG2.torrserver);
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  }
+  function firePreload(hash, index) {
+    const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = ctrl && setTimeout(() => ctrl.abort(), PRELOAD_ABORT_MS);
+    fetch(`${tsBase()}/stream?link=${hash}&index=${index}&preload`, { headers: tsHeaders(), signal: ctrl && ctrl.signal }).then((res) => res.body && res.body.cancel && res.body.cancel()).catch(() => {
+    }).finally(() => clearTimeout(timer));
+  }
+  async function waitFiles(hash, job) {
+    for (let i = 0; i < FILES_TRIES2 && !job.cancelled; i++) {
+      const json = await tsTorrents({ action: "get", hash }).catch(() => null);
+      if (json && json.file_stats && json.file_stats.length) return json.file_stats;
+      await new Promise((r) => setTimeout(r, FILES_EVERY_MS2));
+    }
+    if (job.cancelled) return null;
+    throw fail2(MSG2.noFiles);
+  }
+  function helperUrl() {
+    const v = lampa().Storage.get("lh_helper_url", HELPER_DEFAULT);
+    return String(v || HELPER_DEFAULT).trim().replace(/\/+$/, "");
+  }
+  var busy = false;
+  async function preload(card) {
+    const L = lampa();
+    if (!card || busy) return;
+    busy = true;
+    const job = { cancelled: false };
+    const finish = () => {
+      busy = false;
+      L.Loading.stop();
+    };
+    L.Loading.start(() => {
+      job.cancelled = true;
+      finish();
+    }, MSG2.search);
+    try {
+      tsBase();
+      const { movie, ctx } = await resolveTarget(card);
+      if (job.cancelled) return;
+      const results = await searchTorrents(buildSearchParams(movie, ctx, storageField("parse_lang")));
+      if (job.cancelled) return;
+      const { chosen } = selectTorrent(results, ctx);
+      if (!chosen) throw fail2(MSG2.none);
+      L.Loading.setText(MSG2.server);
+      const snapshot = cardSnapshot(movie);
+      const added = await tsTorrents({
+        action: "add",
+        link: chosen.MagnetUri || chosen.Link,
+        title: "[LAMPA] " + String(chosen.Title).replace("??", "?"),
+        poster: movie.poster_path ? L.Api.img(movie.poster_path) : "",
+        data: JSON.stringify({ lampa: true, movie: snapshot }),
+        save_to_db: true,
+        category: ctx.kind === "movie" ? "movie" : "tv"
+      });
+      const hash = added && added.hash;
+      if (!hash) throw fail2(MSG2.torrserver);
+      if (job.cancelled) return;
+      L.Loading.setText(MSG2.files);
+      const files = await waitFiles(hash, job);
+      if (job.cancelled || !files) return;
+      const file = pickFile(files, ctx);
+      if (!file) throw fail2(MSG2.noFile);
+      firePreload(hash, file.id);
+      store.preload.set(entryKey(movie), {
+        hash,
+        index: file.id,
+        title: chosen.Title,
+        kind: ctx.kind,
+        season: ctx.season,
+        episode: ctx.episode,
+        absolute: ctx.absolute,
+        size: file.length,
+        added: Date.now(),
+        card: snapshot
+      });
+      console.log("lampa-home", "preload", ctx, chosen.Title, hash, file.id);
+      finish();
+      L.Noty.show(MSG2.started);
+    } catch (err) {
+      if (job.cancelled) return;
+      finish();
+      if (!(err instanceof DlError)) console.error("lampa-home preload", err);
+      L.Noty.show(err instanceof DlError ? err.message : MSG2.torrserver);
+    }
+  }
+  async function status(hash, index) {
+    const json = await tsTorrents({ action: "get", hash });
+    const p = preloadProgress({ loaded_size: json && json.loaded_size, file_stats: json && json.file_stats, index });
+    const file = (json && json.file_stats || []).find((f) => f.id === index);
+    return { loaded: json && json.loaded_size || 0, size: file && file.length || 0, ...p };
+  }
+  async function remove(cardId) {
+    const L = lampa();
+    const entry = store.preload.get(cardId);
+    if (!entry) return true;
+    try {
+      const res = await fetch(helperUrl() + "/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hash: entry.hash })
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json || !json.ok) throw new Error(json && json.error || String(res.status));
+    } catch (e) {
+      console.log("lampa-home", "helper delete failed", e && e.message);
+      L.Noty.show(MSG2.helper);
+      return false;
+    }
+    store.preload.remove(cardId);
+    L.Noty.show(MSG2.removed);
+    return true;
+  }
+  var pollQueue = createQueue(2);
+  function component3(object) {
+    const L = lampa();
+    object.params = { ...object.params || {}, items: { mapping: "grid", cols: COLS2 } };
+    const comp = L.Maker.make("Category", object, (m) => m.MASK.base);
+    const badges = /* @__PURE__ */ new Map();
+    let timer = null;
+    let pending = 0;
+    const isActive = () => {
+      const a = L.Activity.active();
+      return !!a && a.component === NAME3 && !comp.destroyed;
+    };
+    function refresh(first) {
+      if (!first && !isActive() || pending) return;
+      badges.forEach(({ el, entry }) => {
+        pending++;
+        pollQueue(() => status(entry.hash, entry.index)).then((p) => {
+          el.textContent = badgeLabel(p);
+          el.classList.toggle("lh-dl-badge--done", p.done);
+        }).catch(() => {
+          el.textContent = "\u041D\u0435\u0442 \u0441\u0432\u044F\u0437\u0438";
+        }).finally(() => {
+          pending--;
+        });
+      });
+    }
+    function confirmRemove(cardId) {
+      const enabled = L.Controller.enabled().name;
+      L.Select.show({
+        title: MSG2.confirm,
+        items: [{ title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C", remove: true }, { title: "\u041E\u0442\u043C\u0435\u043D\u0430" }],
+        onSelect: (a) => {
+          L.Controller.toggle(enabled);
+          if (!a.remove) return;
+          remove(cardId).then((ok) => {
+            if (ok && isActive()) L.Activity.replace();
+          });
+        },
+        onBack: () => L.Controller.toggle(enabled)
+      });
+    }
+    comp.use({
+      onCreate() {
+        this.render(true).classList.add("lh-catalog", "lh-downloads");
+        const entries = store.preload.all().filter((e) => e.card && e.hash);
+        const results = entries.map((e) => {
+          const card = toWideCard(e.card);
+          card.lh_entry = e;
+          return card;
+        });
+        if (!results.length) return this.empty();
+        this.build({ results, total_pages: 1 });
+        refresh(true);
+        timer = setInterval(refresh, POLL_MS);
+      },
+      onInstance(item, data) {
+        const entry = data.lh_entry;
+        item.use({
+          onCreate() {
+            const el = item.render(true);
+            applyPosterClass(el, data);
+            item.menu_list = [];
+            const view = el.querySelector(".card__view");
+            if (view) {
+              const badge = document.createElement("div");
+              badge.className = "lh-dl-badge";
+              badge.textContent = "\u2026";
+              view.appendChild(badge);
+              badges.set(entry.cardId, { el: badge, entry });
+            }
+            el.addEventListener("hover:long", guarded(comp, () => confirmRemove(entry.cardId)));
+          },
+          onEnter: guarded(comp, () => {
+            const { card, hash, index, kind, season, episode, absolute } = entry;
+            startFromHash(hash, card, { kind, season, episode, absolute, index });
+          }),
+          onFocus() {
+            L.Background.change(L.Utils.cardImgBackground(data));
+          }
+        });
+      },
+      onDestroy() {
+        this.destroyed = true;
+        clearInterval(timer);
+        badges.clear();
+      }
+    });
+    return comp;
+  }
+  function register4() {
+    lampa().Component.add(NAME3, component3);
+  }
+  function open3() {
+    lampa().Activity.push({ url: "", component: NAME3, title: TITLE2, page: 1 });
+  }
+  function init2() {
+    const L = lampa();
+    L.Listener.follow("full", (e) => {
+      if (e.type !== "options" || !Array.isArray(e.options)) return;
+      const card = e.link && e.link.card || e.data && e.data.movie;
+      if (!card || !card.id) return;
+      e.options.push({ title: "\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u0437\u0430\u0440\u0430\u043D\u0435\u0435", onSelect: () => preload(card) });
+    });
+  }
+
   // src/menu.js
   var CATALOG_ACTIONS = ["movie", "tv", "cartoon", "anime"];
-  var KEEP_ACTIONS = ["main", "movie", "tv", "cartoon", "anime", "settings"];
+  var DOWNLOADS_ACTION = "lh_downloads";
+  var KEEP_ACTIONS = ["main", "movie", "tv", "cartoon", "anime", "settings", DOWNLOADS_ACTION];
+  var DOWNLOADS_ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   var HIDE_CLASS = "lh-hide";
   function shouldHide(action) {
     return !KEEP_ACTIONS.includes(action);
@@ -1572,8 +1942,16 @@
     L.Activity.replace({ component: COMPONENT, title: HOME_TITLE, source: "tmdb" });
     return true;
   }
-  function init2() {
+  function addDownloadsItem() {
     const L = lampa();
+    if (!L.Menu || typeof L.Menu.addButton !== "function") return;
+    if (window.$('.menu .menu__item[data-action="' + DOWNLOADS_ACTION + '"]').length) return;
+    const item = L.Menu.addButton(DOWNLOADS_ICON, TITLE2, () => open3());
+    if (item && item.attr) item.attr("data-action", DOWNLOADS_ACTION);
+  }
+  function init3() {
+    const L = lampa();
+    addDownloadsItem();
     L.Listener.follow("menu", (e) => {
       if (e.type !== "action") return;
       if (e.action === "main") {
@@ -1615,10 +1993,10 @@
   var START_DELAY_MS = 3e3;
   function diffNewEpisodes(items, seenGetter) {
     const out = [];
-    for (const { card, status } of items) {
-      if (!status || !status.airing) continue;
+    for (const { card, status: status2 } of items) {
+      if (!status2 || !status2.airing) continue;
       const seen = seenGetter(card.id);
-      if (seen != null && status.aired > seen) out.push({ id: card.id, aired: status.aired, card });
+      if (seen != null && status2.aired > seen) out.push({ id: card.id, aired: status2.aired, card });
     }
     return out;
   }
@@ -1647,10 +2025,10 @@
   }
   async function checkNewEpisodes() {
     const items = await Promise.all(
-      candidates().map((card) => tvStatus(card.id).then((status) => ({ card, status }), () => ({ card, status: null })))
+      candidates().map((card) => tvStatus(card.id).then((status2) => ({ card, status: status2 }), () => ({ card, status: null })))
     );
     const fresh = diffNewEpisodes(items, (id) => store.seen.get(id));
-    for (const { card, status } of items) if (status) store.seen.set(card.id, status.aired);
+    for (const { card, status: status2 } of items) if (status2) store.seen.set(card.id, status2.aired);
     return { fresh, learned: shouldMark(items) };
   }
   function showSequential(lines) {
@@ -1683,7 +2061,7 @@
     storage.set(STORAGE_KEYS.seen, {});
     noty("\u041E\u0447\u0438\u0449\u0435\u043D\u043E");
   }
-  function register4() {
+  function register5() {
     const api = lampa().SettingsApi;
     api.addComponent({ component: COMPONENT2, name: "Lampa Home", icon: ICON });
     api.addParam({
@@ -1700,6 +2078,11 @@
       component: COMPONENT2,
       param: { name: "lh_notify", type: "trigger", default: true },
       field: { name: "\u0423\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E \u043D\u043E\u0432\u044B\u0445 \u0441\u0435\u0440\u0438\u044F\u0445", description: "\u041F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0441\u043E\u043E\u0431\u0449\u0430\u0442\u044C \u043E \u043D\u043E\u0432\u044B\u0445 \u0441\u0435\u0440\u0438\u044F\u0445 \u043F\u0440\u043E\u0441\u043C\u0430\u0442\u0440\u0438\u0432\u0430\u0435\u043C\u043E\u0433\u043E \u0430\u043D\u0438\u043C\u0435" }
+    });
+    api.addParam({
+      component: COMPONENT2,
+      param: { name: "lh_helper_url", type: "input", values: "", placeholder: HELPER_DEFAULT, default: HELPER_DEFAULT },
+      field: { name: "\u0410\u0434\u0440\u0435\u0441 \u043F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430 \u043D\u0430 \u041F\u041A", description: "\u041D\u0443\u0436\u0435\u043D, \u0447\u0442\u043E\u0431\u044B \u0443\u0434\u0430\u043B\u044F\u0442\u044C \u0441\u043A\u0430\u0447\u0430\u043D\u043D\u043E\u0435 \u0441 \u0434\u0438\u0441\u043A\u0430 (helper/ts-clean.js)" }
     });
     api.addParam({
       component: COMPONENT2,
@@ -1723,14 +2106,16 @@
     style.textContent = text;
     document.head.appendChild(style);
   }
-  function init3() {
+  function init4() {
     injectCss(styles_default);
     register2();
-    register4();
+    register5();
     register3();
     register();
+    register4();
     init();
     init2();
+    init3();
     start();
     console.log(PLUGIN, VERSION, "loaded");
   }
@@ -1739,7 +2124,7 @@
       Lampa.Noty.show("Lampa Home: \u043D\u0435\u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F Lampa");
       return;
     }
-    init3();
+    init4();
   }
   if (window.lampa_home_ready) {
   } else {

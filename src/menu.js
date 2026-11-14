@@ -3,12 +3,15 @@
 import { lampa } from './lampa.js';
 import * as home from './home.js';
 import * as catalog from './catalog.js';
+import * as downloads from './downloads.js';
 
 const CATALOG_ACTIONS = ['movie', 'tv', 'cartoon', 'anime'];
-const KEEP_ACTIONS = ['main', 'movie', 'tv', 'cartoon', 'anime', 'settings'];
+const DOWNLOADS_ACTION = 'lh_downloads';
+const KEEP_ACTIONS = ['main', 'movie', 'tv', 'cartoon', 'anime', 'settings', DOWNLOADS_ACTION];
+const DOWNLOADS_ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const HIDE_CLASS = 'lh-hide';
 
-// True for a menu action that is not one of the six items we keep.
+// True for a menu action that is not one of the items we keep (six native + «Скачанное»).
 export function shouldHide(action) {
   return !KEEP_ACTIONS.includes(action);
 }
@@ -50,8 +53,19 @@ function swapStart() {
   return true;
 }
 
+// «Скачанное»: Lampa binds menu actions only for items present at its ready(), so
+// the item gets its own handler; data-action keeps it out of hideItems().
+function addDownloadsItem() {
+  const L = lampa();
+  if (!L.Menu || typeof L.Menu.addButton !== 'function') return;
+  if (window.$('.menu .menu__item[data-action="' + DOWNLOADS_ACTION + '"]').length) return;
+  const item = L.Menu.addButton(DOWNLOADS_ICON, downloads.TITLE, () => downloads.open());
+  if (item && item.attr) item.attr('data-action', DOWNLOADS_ACTION);
+}
+
 export function init() {
   const L = lampa();
+  addDownloadsItem();
 
   L.Listener.follow('menu', (e) => {
     if (e.type !== 'action') return;
