@@ -38,3 +38,10 @@ export function applyBadge(cardEl, status) {
   el.textContent = badgeText(status);
   view.appendChild(el);
 }
+
+// Banner source: the first card, or a random one among the first five.
+export function pickBannerCard(cards, random, rnd = Math.random) {
+  if (!cards || !cards.length) return undefined;
+  if (!random) return cards[0];
+  return cards[Math.floor(rnd() * Math.min(5, cards.length))];
+}

@@ -34,3 +34,18 @@ test('test_badge_text', async () => {
   const { badgeText } = await import('../src/cards.js');
   assert.strictEqual(badgeText({ aired: 7, total: 12 }), '7 из 12');
 });
+
+test('test_pick_banner_first_by_default', async () => {
+  const { pickBannerCard } = await import('../src/cards.js');
+  const cards = [{ id: 1 }, { id: 2 }, { id: 3 }];
+  assert.strictEqual(pickBannerCard(cards, false, () => 0.99).id, 1);
+  assert.strictEqual(pickBannerCard([], true), undefined);
+});
+
+test('test_pick_banner_random_within_first_five', async () => {
+  const { pickBannerCard } = await import('../src/cards.js');
+  const cards = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id }));
+  assert.strictEqual(pickBannerCard(cards, true, () => 0).id, 1);
+  assert.strictEqual(pickBannerCard(cards, true, () => 0.999).id, 5);
+  assert.strictEqual(pickBannerCard(cards.slice(0, 2), true, () => 0.999).id, 2);
+});

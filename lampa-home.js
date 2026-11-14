@@ -301,6 +301,7 @@
     get: (key, empty) => window.Lampa.Storage.get(key, empty),
     set: (key, value) => window.Lampa.Storage.set(key, value)
   };
+  var noty = (text) => window.Lampa.Noty.show(text);
   var tmdbGet = (url, params, ok, fail2) => window.Lampa.Api.sources.tmdb.get(url, params, ok, fail2);
   var favoriteGet = (params) => window.Lampa.Favorite.get(params) || [];
   var lampa = () => window.Lampa;
@@ -701,6 +702,11 @@
     el.className = "lh-badge";
     el.textContent = badgeText(status);
     view.appendChild(el);
+  }
+  function pickBannerCard(cards, random, rnd = Math.random) {
+    if (!cards || !cards.length) return void 0;
+    if (!random) return cards[0];
+    return cards[Math.floor(rnd() * Math.min(5, cards.length))];
   }
 
   // src/tmdb.js
@@ -1325,7 +1331,7 @@
   }
   function bannerCard(rows) {
     const row = rows.find((r) => r.params.lh_row === "movies") || rows[0];
-    return row && row.results[0];
+    return row && pickBannerCard(row.results, storageField("lh_banner_random") === true);
   }
   function createBanner(comp, card) {
     const L = lampa();
@@ -1388,9 +1394,12 @@
           if (this.destroyed) return;
           const rows = buildRows(loaded);
           if (!rows.length) return this.empty();
-          const banner = createBanner(this, bannerCard(rows));
-          this.render(true).querySelector(".scroll__body").prepend(banner.render(true));
-          this.items.push(banner);
+          const bcard = storageField("lh_banner") === false ? null : bannerCard(rows);
+          const banner = bcard && createBanner(this, bcard);
+          if (banner) {
+            this.render(true).querySelector(".scroll__body").prepend(banner.render(true));
+            this.items.push(banner);
+          }
           this.build(rows);
         }).catch(() => {
           if (!this.destroyed) this.empty();
@@ -1573,6 +1582,40 @@
     }
   }
 
+  // src/settings.js
+  var COMPONENT2 = "lh_settings";
+  var ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+  function resetCache() {
+    storage.set(STORAGE_KEYS.tvcache, {});
+    storage.set(STORAGE_KEYS.seen, {});
+    noty("\u041E\u0447\u0438\u0449\u0435\u043D\u043E");
+  }
+  function register4() {
+    const api = lampa().SettingsApi;
+    api.addComponent({ component: COMPONENT2, name: "Lampa Home", icon: ICON });
+    api.addParam({
+      component: COMPONENT2,
+      param: { name: "lh_banner", type: "trigger", default: true },
+      field: { name: "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0431\u0430\u043D\u043D\u0435\u0440", description: "\u0411\u043E\u043B\u044C\u0448\u043E\u0439 \u0431\u0430\u043D\u043D\u0435\u0440 \u0441\u0432\u0435\u0440\u0445\u0443 \u0433\u043B\u0430\u0432\u043D\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u044B" }
+    });
+    api.addParam({
+      component: COMPONENT2,
+      param: { name: "lh_banner_random", type: "trigger", default: false },
+      field: { name: "\u0421\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0439 \u0431\u0430\u043D\u043D\u0435\u0440", description: "\u0421\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0439 \u0444\u0438\u043B\u044C\u043C \u0438\u0437 \u043F\u0435\u0440\u0432\u044B\u0445 \u043F\u044F\u0442\u0438 \u0432\u043C\u0435\u0441\u0442\u043E \u043F\u0435\u0440\u0432\u043E\u0433\u043E" }
+    });
+    api.addParam({
+      component: COMPONENT2,
+      param: { name: "lh_notify", type: "trigger", default: true },
+      field: { name: "\u0423\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E \u043D\u043E\u0432\u044B\u0445 \u0441\u0435\u0440\u0438\u044F\u0445", description: "\u041F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0441\u043E\u043E\u0431\u0449\u0430\u0442\u044C \u043E \u043D\u043E\u0432\u044B\u0445 \u0441\u0435\u0440\u0438\u044F\u0445 \u043F\u0440\u043E\u0441\u043C\u0430\u0442\u0440\u0438\u0432\u0430\u0435\u043C\u043E\u0433\u043E \u0430\u043D\u0438\u043C\u0435" }
+    });
+    api.addParam({
+      component: COMPONENT2,
+      param: { name: "lh_reset_cache", type: "button" },
+      field: { name: "\u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C \u043A\u044D\u0448", description: "\u041E\u0447\u0438\u0441\u0442\u0438\u0442\u044C \u043A\u044D\u0448 \u0441\u0442\u0430\u0442\u0443\u0441\u043E\u0432 \u0441\u0435\u0440\u0438\u0430\u043B\u043E\u0432 \u0438 \u043E\u0442\u043C\u0435\u0442\u043A\u0438 \u043E \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D\u043D\u044B\u0445 \u0441\u0435\u0440\u0438\u044F\u0445" },
+      onChange: resetCache
+    });
+  }
+
   // src/index.js
   var PLUGIN = "lampa-home";
   var VERSION = "0.1.0";
@@ -1590,6 +1633,7 @@
   function init3() {
     injectCss(styles_default);
     register2();
+    register4();
     register3();
     register();
     init();

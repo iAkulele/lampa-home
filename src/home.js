@@ -1,10 +1,10 @@
 // Home screen component `lh_home`: six rows of wide cards instead of Lampa's main page.
-import { lampa } from './lampa.js';
+import { lampa, storageField } from './lampa.js';
 import * as play from './play.js';
 import * as catalog from './catalog.js';
 import { ROWS } from './config.js';
 import { loadRow, todayIso, tvStatus } from './tmdb.js';
-import { toWideCard, applyBadge } from './cards.js';
+import { toWideCard, applyBadge, pickBannerCard } from './cards.js';
 import { BANNER, bannerVars, genreMap } from './templates.js';
 
 const NAME = 'lh_home';
@@ -21,7 +21,7 @@ export function wantsBadge(rowKey, cardData) {
 // Source card of the banner: first card of the movies row, else of the first row.
 export function bannerCard(rows) {
   const row = rows.find((r) => r.params.lh_row === 'movies') || rows[0];
-  return row && row.results[0];
+  return row && pickBannerCard(row.results, storageField('lh_banner_random') === true);
 }
 
 // The hero banner as a pseudo-row of Main: Main navigates its `items` by index
@@ -96,9 +96,12 @@ function component(object) {
         const rows = buildRows(loaded);
         if (!rows.length) return this.empty();
         // Before build(): build() focuses items[active], which must be the banner.
-        const banner = createBanner(this, bannerCard(rows));
-        this.render(true).querySelector('.scroll__body').prepend(banner.render(true));
-        this.items.push(banner);
+        const bcard = storageField('lh_banner') === false ? null : bannerCard(rows);
+        const banner = bcard && createBanner(this, bcard);
+        if (banner) {
+          this.render(true).querySelector('.scroll__body').prepend(banner.render(true));
+          this.items.push(banner);
+        }
         this.build(rows);
       }).catch(() => {
         if (!this.destroyed) this.empty();
