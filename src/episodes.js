@@ -1,0 +1,71 @@
+// Pure episode helpers: no window, no Lampa.
+
+const realSeasons = (seasons) =>
+  (seasons || []).filter((s) => s && s.season_number > 0).sort((a, b) => a.season_number - b.season_number);
+
+const findSeason = (seasons, n) => realSeasons(seasons).find((s) => s.season_number === n);
+
+export function episodeStatus(tv, today) {
+  const list = realSeasons(tv && tv.seasons);
+  const last = tv && tv.last_episode_to_air;
+  const airing = !!tv && (tv.status === 'Returning Series' || !!tv.next_episode_to_air);
+
+  if (!last) {
+    const s = list[list.length - 1];
+    const total = s ? s.episode_count : 0;
+    return { season: s ? s.season_number : 1, aired: total, total, airing };
+  }
+
+  const season = last.season_number;
+  const info = findSeason(list, season);
+  const total = info ? info.episode_count : last.episode_number;
+  const future = !!last.air_date && !!today && last.air_date > today;
+  const aired = future ? Math.max(0, last.episode_number - 1) : last.episode_number;
+  return { season, aired, total, airing };
+}
+
+export function absoluteEpisode(seasons, season, episode) {
+  let sum = 0;
+  for (const s of realSeasons(seasons)) {
+    if (s.season_number < season) sum += s.episode_count;
+  }
+  return sum + episode;
+}
+
+export function nextEpisode(progress, seasons) {
+  if (!progress) return { season: 1, episode: 1 };
+  const cur = findSeason(seasons, progress.season);
+  if (cur && progress.episode < cur.episode_count) {
+    return { season: progress.season, episode: progress.episode + 1 };
+  }
+  if (findSeason(seasons, progress.season + 1)) {
+    return { season: progress.season + 1, episode: 1 };
+  }
+  return { season: progress.season, episode: progress.episode };
+}
+
+const NOT_EPISODE_NUMBERS = new Set([360, 480, 576, 720, 1080, 1440, 2160, 4320]);
+
+export function parseEpisode(filename) {
+  const result = (season, episode, absolute) => ({ season, episode, absolute });
+  let name = String(filename || '').replace(/^.*[\\/]/, '');
+  name = name.replace(/(?<![0-9A-Za-z])(?:19|20)\d{2}(?![0-9A-Za-z])/g, ' ');
+
+  let m = name.match(/(?<![0-9A-Za-z])s(\d{1,2})[ ._-]?e(\d{1,4})(?!\d)/i);
+  if (m) return result(+m[1], +m[2], null);
+
+  m = name.match(/(?<![0-9A-Za-z])(\d{1,2})x(\d{1,4})(?![0-9A-Za-z])/i);
+  if (m) return result(+m[1], +m[2], null);
+
+  m = name.match(/сезон\s*(\d{1,2})\D{0,10}?сери[яи]\s*(\d{1,4})/i);
+  if (m) return result(+m[1], +m[2], null);
+
+  m = name.match(/(?<![0-9A-Za-z])(?:ep(?:isode)?|e)[ ._-]?(\d{1,4})(?!\d)/i) ||
+    name.match(/сери[яи][ ._-]?(\d{1,4})(?!\d)/i);
+  if (m) return result(null, +m[1], +m[1]);
+
+  m = name.match(/\[(\d{1,4})\]/) || name.match(/\s-\s(\d{1,4})(?=\s|\.|\[|$)/);
+  if (m && !NOT_EPISODE_NUMBERS.has(+m[1])) return result(null, +m[1], +m[1]);
+
+  return result(null, null, null);
+}
