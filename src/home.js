@@ -27,19 +27,17 @@ function createBanner(comp, card) {
   const L = lampa();
   const vars = bannerVars(card, {
     img: L.Api.img,
-    shortText: L.Utils.shortText,
     genres: genreMap(L.Api.sources.tmdb.genres, L.Lang.translate),
   });
   const html = L.Template.get(BANNER, vars);
   const el = html[0];
-  const path = card.backdrop_path || card.poster_path;
-  const background = path ? L.Api.img(path, 'w1280') : '';
   let last = false;
 
   html.find('.selector').on('hover:focus', function () {
     last = this;
     comp.scroll.update(el);
-    if (background) L.Background.change(background);
+    // Same as the row cards: respects the user's background setting.
+    L.Background.change(L.Utils.cardImgBackground(card));
   });
   html.find('.lh-banner__play').on('hover:enter', () => {
     noty('Играть появится позже');

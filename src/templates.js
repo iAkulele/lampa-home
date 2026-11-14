@@ -16,8 +16,9 @@ const BANNER_HTML = `<div class="lh-banner" style="background-image:url('{backdr
   </div>
 </div>`;
 
-// Template.get pastes values raw into HTML via String.replace, so escape both
-// HTML specials and `$` (replacement patterns like `$&`).
+// Template.get pastes values raw into HTML via String.replace, so escape HTML
+// specials, `$` (replacement patterns like `$&`) and braces (a value holding
+// `{meta}` would otherwise be substituted again by a later var).
 function esc(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -25,7 +26,9 @@ function esc(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
-    .replace(/\$/g, '&#36;');
+    .replace(/\$/g, '&#36;')
+    .replace(/\{/g, '&#123;')
+    .replace(/\}/g, '&#125;');
 }
 
 // {id: 'Name'} from Lampa.Api.sources.tmdb.genres ({movie: [{id, title}], tv: [...]}).
@@ -43,9 +46,20 @@ export function genreMap(tmdbGenres, translate) {
   return map;
 }
 
-// Vars for the banner template. `img(path, size)` and `shortText(text, len)` are
-// Lampa.Api.img / Lampa.Utils.shortText; `genres` is a genreMap() result.
-export function bannerVars(card, { img, shortText, genres = {} }) {
+// Cut text to at most `max` chars at a word boundary, ending with `…`.
+// (Lampa.Utils.shortText cuts out the middle, which reads badly for overviews.)
+export function truncate(text, max) {
+  const str = String(text == null ? '' : text);
+  if (str.length <= max) return str;
+  const head = str.slice(0, max - 3);
+  const space = head.lastIndexOf(' ');
+  const cut = space > 0 ? head.slice(0, space) : str.slice(0, max - 1);
+  return cut.replace(/[\s,.;:—-]+$/, '') + '…';
+}
+
+// Vars for the banner template. `img(path, size)` is Lampa.Api.img;
+// `genres` is a genreMap() result.
+export function bannerVars(card, { img, genres = {} }) {
   const date = card.release_date || card.first_air_date || '';
   const genre = (card.genre_ids || []).map((id) => genres[id]).find(Boolean);
   const rating = Number(card.vote_average) > 0 ? '★ ' + Number(card.vote_average).toFixed(1) : '';
@@ -54,7 +68,7 @@ export function bannerVars(card, { img, shortText, genres = {} }) {
   return {
     title: esc(card.title || card.name),
     meta: esc(meta),
-    overview: esc(card.overview ? shortText(card.overview, 180) : ''),
+    overview: esc(truncate(card.overview, 180)),
     backdrop: path ? esc(img(path, 'w1280')) : '',
   };
 }

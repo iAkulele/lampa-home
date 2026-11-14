@@ -261,7 +261,7 @@
   </div>
 </div>`;
   function esc(value) {
-    return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/\$/g, "&#36;");
+    return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/\$/g, "&#36;").replace(/\{/g, "&#123;").replace(/\}/g, "&#125;");
   }
   function genreMap(tmdbGenres, translate) {
     const map = {};
@@ -275,7 +275,15 @@
     });
     return map;
   }
-  function bannerVars(card, { img, shortText, genres = {} }) {
+  function truncate(text, max) {
+    const str = String(text == null ? "" : text);
+    if (str.length <= max) return str;
+    const head = str.slice(0, max - 3);
+    const space = head.lastIndexOf(" ");
+    const cut = space > 0 ? head.slice(0, space) : str.slice(0, max - 1);
+    return cut.replace(/[\s,.;:—-]+$/, "") + "\u2026";
+  }
+  function bannerVars(card, { img, genres = {} }) {
     const date = card.release_date || card.first_air_date || "";
     const genre = (card.genre_ids || []).map((id) => genres[id]).find(Boolean);
     const rating = Number(card.vote_average) > 0 ? "\u2605 " + Number(card.vote_average).toFixed(1) : "";
@@ -284,7 +292,7 @@
     return {
       title: esc(card.title || card.name),
       meta: esc(meta),
-      overview: esc(card.overview ? shortText(card.overview, 180) : ""),
+      overview: esc(truncate(card.overview, 180)),
       backdrop: path ? esc(img(path, "w1280")) : ""
     };
   }
@@ -307,18 +315,15 @@
     const L = lampa();
     const vars = bannerVars(card, {
       img: L.Api.img,
-      shortText: L.Utils.shortText,
       genres: genreMap(L.Api.sources.tmdb.genres, L.Lang.translate)
     });
     const html = L.Template.get(BANNER, vars);
     const el = html[0];
-    const path = card.backdrop_path || card.poster_path;
-    const background = path ? L.Api.img(path, "w1280") : "";
     let last = false;
     html.find(".selector").on("hover:focus", function() {
       last = this;
       comp.scroll.update(el);
-      if (background) L.Background.change(background);
+      L.Background.change(L.Utils.cardImgBackground(card));
     });
     html.find(".lh-banner__play").on("hover:enter", () => {
       noty("\u0418\u0433\u0440\u0430\u0442\u044C \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u043F\u043E\u0437\u0436\u0435");
