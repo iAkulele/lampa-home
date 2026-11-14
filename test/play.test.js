@@ -168,3 +168,16 @@ test('test_normalize_titles_for_timeline_hash', () => {
   const movie = { id: 2, title: 'Дюна', original_title: 'Dune' };
   assert.deepStrictEqual(normalizeTitles(movie), movie);
 });
+
+test('test_pick_file_rejects_bare_hit_from_other_season_folder', () => {
+  const files = [
+    { id: 1, path: 'Show/Season 1/Серия 5.mkv', length: GiB },
+    { id: 2, path: 'Show/Season 2/Серия 4.mkv', length: GiB },
+  ];
+  const ctx = { kind: 'tv', season: 2, episode: 5, absolute: 12 };
+  const infos = [{ id: 1, season: 1, episode: 5 }, { id: 2, season: 2, episode: 4 }];
+  assert.strictEqual(pickFile(files, ctx, infos), null);
+  // A season Lampa only guessed (no marker in the path) does not reject the hit.
+  const guessed = [{ id: 1, season: 1, episode: 5, defaultSeason: true }, { id: 2, season: 1, episode: 4, defaultSeason: true }];
+  assert.strictEqual(pickFile(files, ctx, guessed).id, 1);
+});

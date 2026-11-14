@@ -56,8 +56,10 @@ export function titleHasSeason(title) {
   return !!(p.seasons || p.sxeRange || (p.episode && p.episode.season != null));
 }
 
-// files: [{id, path, length}]; infos (optional): [{id, season, episode}] as Lampa's
-// Torserver.parse sees them (it also reads season folders). Returns the file or null.
+// files: [{id, path, length}]; infos (optional): [{id, season, episode, defaultSeason}]
+// as Lampa's Torserver.parse sees them (it also reads season folders);
+// defaultSeason: no season marker in the path, `season` is Lampa's guess.
+// Returns the file or null.
 export function pickFile(files, ctx, infos) {
   const videos = (files || []).filter(isVideo);
   if (!videos.length) return null;
@@ -72,11 +74,21 @@ export function pickFile(files, ctx, infos) {
   // series and season packs are numbered per season.
   const absFirst = ctx.kind === 'anime' && !ctx.titleHasSeason;
   const numbers = absFirst ? [ctx.absolute, ctx.episode] : [ctx.episode, ctx.absolute];
+  const infoOf = (f) => (Array.isArray(infos) ? infos.find((i) => i && i.id === f.id) : null);
+  // "Season 1/Серия 5" is not S2E5 even when it is the only "5" in the pack.
+  const otherSeason = (f) => {
+    const i = infoOf(f);
+    return !!i && !i.defaultSeason && i.season != null && i.season !== ctx.season;
+  };
   let ambiguous = false;
   for (const n of numbers) {
     if (n == null) continue;
     const hits = bare.filter(({ ep }) => ep.absolute === n);
-    if (hits.length === 1) return hits[0].f;
+    if (hits.length === 1) {
+      if (!otherSeason(hits[0].f)) return hits[0].f;
+      ambiguous = true;
+      break;
+    }
     // "Season 1/Серия 5" and "Season 2/Серия 5": the bare number says nothing.
     if (hits.length > 1) {
       ambiguous = true;
@@ -254,10 +266,16 @@ function parsePlays(files, movie) {
   }));
 }
 
-// [{id, season, episode}] for pickFile(); null if Lampa could not parse the list.
+// [{id, season, episode, defaultSeason}] for pickFile(); null if Lampa could not
+// parse the list. Without a season marker Lampa assumes season 1 for a serial
+// (0 for a non-serial): a second parse as a non-serial tells the guess apart.
 export function fileInfos(files, movie) {
+  const L = lampa();
   try {
-    return parsePlays(files, movie).map(({ file, info }) => ({ id: file.id, season: info.season, episode: info.episode }));
+    return parsePlays(files, movie).map(({ file, info }) => {
+      const bare = L.Torserver.parse({ movie: { ...movie, number_of_seasons: 0 }, files: [], filename: file.path_human, path: file.path, is_file: true });
+      return { id: file.id, season: info.season, episode: info.episode, defaultSeason: !(bare.season > 0) };
+    });
   } catch (e) {
     return null;
   }
@@ -382,7 +400,7 @@ async function playFiles(job, card, movie, ctx) {
   if (job.cancelled || !files) return 'cancelled';
 
   const playlist = buildPlaylist(files, movie, job.hash);
-  const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, playlist);
+  const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, fileInfos(files, movie));
   const element = file && playlist.find((p) => p.id === file.id);
   if (!element) return 'nofile';
 
