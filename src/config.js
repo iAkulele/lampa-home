@@ -48,7 +48,9 @@ export const RUSSIAN_MARKERS =
 export const SCREENER_MARKERS =
   'camrip|\\bcam\\b|telesync|\\bts\\b|\\btc\\b|hdts|hdtc|telecine|экранк|\\bline\\b';
 
-export const DV_MARKERS = '\\bdv\\b|dolby ?vision';
+export const DV_MARKERS = '\\bdv\\b|\\bdovi\\b|dolby[ ._-]?vision';
+// Dolby Vision profile 5 has no HDR10 base layer: rejected even when HDR10 is named.
+export const DV_P5_MARKERS = '\\bp5\\b|profile ?5';
 export const HDR_MARKERS = 'hdr10|hdr\\b|\\bp8\\b|profile ?8';
 
 // Scoring weights (penalty-based, not lexicographic).
@@ -65,7 +67,11 @@ export const SCORING = {
   sizePenaltyPerGiB: 0.2,
 };
 
-// Subtitle-only mentions ("Rus Sub", "RusSub", "Sub Rus", "Русские субтитры",
-// "субтитры: рус"): stripped before Russian-audio detection.
+// Subtitle-only mentions are stripped before Russian-audio detection:
+// "Rus Sub", "RusSub", "Rus. Sub", "Русские субтитры" (language before the word) and
+// "Sub Rus", "субтитры: рус", "Subs: Rus, Eng", "Sub (Rus, Eng)" (a language list after it).
+const SUB_WORD = '(?:sub(?:s|titles?)?(?!\\p{L})|субтитр\\p{L}*)';
+const SUB_LANG = '(?:(?:rus|eng|ukr|jap)\\p{L}*|рус\\p{L}*|англ\\p{L}*|укр\\p{L}*)';
 export const SUBTITLE_PHRASES =
-  '(?<![\\p{L}\\d])(?:rus|рус\\p{L}*)\\s*(?:sub\\p{L}*|субтитр\\p{L}*)|(?:sub\\p{L}*|субтитр\\p{L}*)[\\s:.\\-]*(?:rus(?![\\p{L}\\d])|рус\\p{L}*)';
+  '(?<![\\p{L}\\d])(?:rus|рус\\p{L}*)[\\s.]*' + SUB_WORD +
+  '|(?<![\\p{L}\\d])' + SUB_WORD + '[\\s:.(\\-]*(?:' + SUB_LANG + '[\\s,+/.]*)+\\)?';

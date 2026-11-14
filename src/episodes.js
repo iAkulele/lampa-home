@@ -44,7 +44,10 @@ export function nextEpisode(progress, seasons) {
   return { season: progress.season, episode: progress.episode };
 }
 
-const NOT_EPISODE_NUMBERS = new Set([360, 480, 576, 720, 1080, 1440, 2160, 4320]);
+// A bare "- 720" / "- 1080" is an episode (One Piece); resolutions carry a "p".
+// A bracketed "[1080]" is still treated as a resolution tag.
+const NOT_EPISODE_NUMBERS = new Set([360, 480, 576, 1440, 2160, 4320]);
+const RESOLUTIONS = new Set([...NOT_EPISODE_NUMBERS, 720, 1080]);
 
 export function parseEpisode(filename) {
   const result = (season, episode, absolute) => ({ season, episode, absolute });
@@ -64,7 +67,9 @@ export function parseEpisode(filename) {
     name.match(/сери[яи][ ._-]?(\d{1,4})(?!\d)/i);
   if (m) return result(null, +m[1], +m[1]);
 
-  m = name.match(/\[(\d{1,4})\]/) || name.match(/\s-\s(\d{1,4})(?=\s|\.|\[|$)/);
+  m = name.match(/\[(\d{1,4})\]/);
+  if (m && !RESOLUTIONS.has(+m[1])) return result(null, +m[1], +m[1]);
+  m = name.match(/\s-\s(\d{1,4})(?=\s|\.|\[|$)/);
   if (m && !NOT_EPISODE_NUMBERS.has(+m[1])) return result(null, +m[1], +m[1]);
 
   return result(null, null, null);

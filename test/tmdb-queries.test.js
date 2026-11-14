@@ -21,8 +21,8 @@ test('test_movies_row_uses_digital_release_us', () => {
   assert.strictEqual(q.url, 'discover/movie');
   assert.strictEqual(q.params.filter['with_release_type'], '4');
   assert.strictEqual(q.params.filter.region, 'US');
-  assert.strictEqual(q.params.sort_by, 'primary_release_date.desc');
-  assert.strictEqual(q.params.filter['primary_release_date.lte'], TODAY);
+  assert.strictEqual(q.params.sort_by, 'release_date.desc');
+  assert.strictEqual(q.params.filter['release_date.lte'], TODAY);
   const without = q.params.filter.without_genres.split(',');
   assert.ok(without.includes('16'));
   assert.ok(without.includes('99'));
@@ -121,8 +121,8 @@ test('test_year_range_maps_decade_string_to_dates', () => {
 
 test('test_catalog_year_range_uses_date_bounds', () => {
   const q = catalogQuery('movie', { genre: null, year: '1990-1999', sort: 'new' }, 1, TODAY);
-  assert.strictEqual(q.params.filter['primary_release_date.gte'], '1990-01-01');
-  assert.strictEqual(q.params.filter['primary_release_date.lte'], '1999-12-31');
+  assert.strictEqual(q.params.filter['release_date.gte'], '1990-01-01');
+  assert.strictEqual(q.params.filter['release_date.lte'], '1999-12-31');
   assert.ok(!('primary_release_year' in q.params.filter));
 });
 
@@ -138,14 +138,14 @@ test('test_catalog_movie_new_has_digital_filter_and_votes', () => {
     const f = catalogQuery(kind, { genre: null, year: null, sort: 'new' }, 1, TODAY).params.filter;
     assert.strictEqual(f.with_release_type, '4');
     assert.strictEqual(f.region, 'US');
-    assert.strictEqual(f['primary_release_date.lte'], TODAY);
+    assert.strictEqual(f['release_date.lte'], TODAY);
     assert.strictEqual(f['vote_count.gte'], '10');
   }
   // rating sort keeps the digital filter and its own vote floor
   const r = catalogQuery('movie', { genre: null, year: null, sort: 'rating' }, 1, TODAY).params.filter;
   assert.strictEqual(r.with_release_type, '4');
   assert.strictEqual(r.region, 'US');
-  assert.strictEqual(r['primary_release_date.lte'], TODAY);
+  assert.strictEqual(r['release_date.lte'], TODAY);
   assert.strictEqual(r['vote_count.gte'], '100');
 });
 
@@ -156,5 +156,34 @@ test('test_catalog_tv_new_has_votes_and_date_cap', () => {
     assert.strictEqual(q.params.filter['first_air_date.lte'], TODAY);
     assert.strictEqual(q.params.filter['vote_count.gte'], '5');
     assert.ok(!('with_release_type' in q.params.filter));
+  }
+});
+
+test('test_movie_rows_sort_and_cap_by_release_date', () => {
+  for (const row of ['movies', 'horror', 'cartoons']) {
+    const q = rowQuery(row, TODAY);
+    assert.strictEqual(q.params.sort_by, 'release_date.desc', row);
+    assert.strictEqual(q.params.filter['release_date.lte'], TODAY, row);
+    assert.ok(!('primary_release_date.lte' in q.params.filter), row);
+    assert.strictEqual(q.params.filter.with_release_type, '4', row);
+    assert.strictEqual(q.params.filter.region, 'US', row);
+  }
+  const c = catalogQuery('cartoon', { genre: null, year: null, sort: 'new' }, 1, TODAY);
+  assert.strictEqual(c.params.sort_by, 'release_date.desc');
+});
+
+test('test_catalog_movie_excludes_animation_and_docs_like_row', () => {
+  const f = catalogQuery('movie', { genre: 28, year: null, sort: 'new' }, 1, TODAY).params.filter;
+  assert.strictEqual(f.without_genres, '16,99');
+  assert.strictEqual(catalogQuery('movie', { genre: null, year: null, sort: 'rating' }, 1, TODAY).params.filter.without_genres, '16,99');
+  // Animation chosen explicitly: no exclusion.
+  assert.ok(!('without_genres' in catalogQuery('movie', { genre: 16, year: null, sort: 'new' }, 1, TODAY).params.filter));
+  // Cartoons are animation by definition.
+  assert.ok(!('without_genres' in catalogQuery('cartoon', { genre: null, year: null, sort: 'new' }, 1, TODAY).params.filter));
+});
+
+test('test_tv_rows_skip_announced_episodes', () => {
+  for (const row of ['anime', 'series']) {
+    assert.strictEqual(rowQuery(row, TODAY).params.filter['air_date.lte'], TODAY, row);
   }
 });

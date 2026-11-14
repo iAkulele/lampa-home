@@ -188,3 +188,39 @@ test('test_season_number_before_word', () => {
   assert.strictEqual(find(res, s4).rejected, 'episode-missing');
   assert.strictEqual(res.chosen.Title, s1);
 });
+
+test('test_subtitle_lists_are_not_russian_audio', () => {
+  for (const t of [
+    'Film (2024) 1080p WEB-DL ENG | Rus. Sub',
+    'Film (2024) 1080p WEB-DL | Original + Sub (Rus, Eng)',
+    'Film (2024) 1080p WEB-DL ENG | Subs: Rus, Eng',
+    'Film (2024) 1080p WEB-DL ENG | Subs: Eng, Rus',
+  ]) {
+    assert.strictEqual(find(selectTorrent([item(t)], { kind: 'movie' }), t).rejected, 'no-russian', t);
+  }
+  const ok = 'Film (2024) 1080p WEB-DL | Sub (Rus) + MVO';
+  assert.strictEqual(find(selectTorrent([item(ok)], { kind: 'movie' }), ok).rejected, null);
+  // A title word starting with "sub" is not a subtitle mention.
+  const substance = 'The Substance 2024 1080p WEB-DL Rus';
+  assert.strictEqual(find(selectTorrent([item(substance)], { kind: 'movie' }), substance).rejected, null);
+});
+
+test('test_dolby_vision_spellings_and_profile_5', () => {
+  const dovi = 'Dune.Part.Two.2024.2160p.WEB-DL.DoVi.Rus.mkv';
+  const dolby = 'Dune.Part.Two.2024.2160p.WEB-DL.Dolby.Vision RUS';
+  const p8 = 'Dune.Part.Two.2024.2160p.WEB-DL.DV HDR10 P8 RUS';
+  const p5 = 'Dune.Part.Two.2024.2160p.WEB-DL.DV P5 HDR10 RUS';
+  const res = selectTorrent([item(dovi), item(dolby), item(p8), item(p5)], { kind: 'movie' });
+  assert.strictEqual(find(res, dovi).rejected, 'dv-only');
+  assert.strictEqual(find(res, dolby).rejected, 'dv-only');
+  assert.strictEqual(find(res, p8).rejected, null);
+  assert.strictEqual(find(res, p5).rejected, 'dv-only');
+  assert.strictEqual(res.chosen.Title, p8);
+});
+
+test('test_english_season_markers', () => {
+  assert.deepStrictEqual(parseTitle('Attack on Titan Season 3 [1080p] RUS').seasons, [3]);
+  assert.deepStrictEqual(parseTitle('Mushoku Tensei 2nd Season [AniLibria]').seasons, [2]);
+  assert.deepStrictEqual(parseTitle('Shingeki no Kyojin TV-2 [AniDub]').seasons, [2]);
+  assert.deepStrictEqual(parseTitle('Show Season 1-3 1080p').seasons, [1, 2, 3]);
+});

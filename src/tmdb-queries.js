@@ -51,12 +51,14 @@ export function daysAgo(today, n) {
   return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
 }
 
-// Digital release in the US, up to today.
+// Digital release in the US, up to today. release_date (not primary_release_date)
+// is the field TMDB filters by release type and region: the digital date itself.
+const MOVIE_DATE = 'release_date';
 function movieFilter(today) {
   return {
     with_release_type: '4',
     region: 'US',
-    'primary_release_date.lte': today,
+    [`${MOVIE_DATE}.lte`]: today,
   };
 }
 
@@ -67,7 +69,7 @@ export function rowQuery(rowKey, today) {
       return {
         url: 'discover/movie',
         params: {
-          sort_by: 'primary_release_date.desc',
+          sort_by: `${MOVIE_DATE}.desc`,
           filter: {
             ...movieFilter(today),
             without_genres: `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`,
@@ -80,7 +82,7 @@ export function rowQuery(rowKey, today) {
         url: 'discover/movie',
         params: {
           genres: 27,
-          sort_by: 'primary_release_date.desc',
+          sort_by: `${MOVIE_DATE}.desc`,
           filter: { ...movieFilter(today), 'vote_count.gte': '20' },
         },
       };
@@ -90,7 +92,13 @@ export function rowQuery(rowKey, today) {
         params: {
           genres: GENRE_ANIMATION,
           sort_by: 'popularity.desc',
-          filter: { with_origin_country: 'JP', 'air_date.gte': daysAgo(today, 14), 'vote_count.gte': '5' },
+          // air_date.lte: shows whose only "recent" episode is still announced stay out.
+          filter: {
+            with_origin_country: 'JP',
+            'air_date.gte': daysAgo(today, 14),
+            'air_date.lte': today,
+            'vote_count.gte': '5',
+          },
         },
       };
     case 'series':
@@ -103,6 +111,7 @@ export function rowQuery(rowKey, today) {
           filter: {
             without_genres: String(GENRE_ANIMATION),
             'air_date.gte': daysAgo(today, 30),
+            'air_date.lte': today,
             'vote_count.gte': '5',
           },
         },
@@ -112,7 +121,7 @@ export function rowQuery(rowKey, today) {
         url: 'discover/movie',
         params: {
           genres: GENRE_ANIMATION,
-          sort_by: 'primary_release_date.desc',
+          sort_by: `${MOVIE_DATE}.desc`,
           filter: { ...movieFilter(today), 'vote_count.gte': '20' },
         },
       };
@@ -146,8 +155,13 @@ export function catalogQuery(kind, filters, page, today) {
     params.genres = filters.genre;
   }
   if (kind === 'anime') f.with_origin_country = 'JP';
+  // Same as the movies row: animation and documentaries live elsewhere, unless
+  // animation is the chosen genre.
+  if (kind === 'movie' && filters.genre !== GENRE_ANIMATION) {
+    f.without_genres = `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`;
+  }
 
-  const dateField = isTv ? 'first_air_date' : 'primary_release_date';
+  const dateField = isTv ? 'first_air_date' : MOVIE_DATE;
   // Movies: only titles with a US digital release, the same rule as the home rows.
   if (!isTv) Object.assign(f, movieFilter(today));
   if (filters.sort === 'rating') {

@@ -131,3 +131,11 @@ test('test_ignores_resolution_tokens', () => {
   assert.deepStrictEqual(parseEpisode('Show.1080p.x265.mkv'), { season: null, episode: null, absolute: null });
   assert.deepStrictEqual(parseEpisode('Show 720p 10bit.mkv'), { season: null, episode: null, absolute: null });
 });
+
+test('test_bare_720_and_1080_are_episodes', () => {
+  assert.deepStrictEqual(parseEpisode('[AniDub] One Piece - 1080 [1080p].mkv'), { season: null, episode: 1080, absolute: 1080 });
+  assert.deepStrictEqual(parseEpisode('One Piece - 720.mkv'), { season: null, episode: 720, absolute: 720 });
+  // With a "p" (or in brackets) the number is still a resolution.
+  assert.deepStrictEqual(parseEpisode('Show - 1080p.mkv'), { season: null, episode: null, absolute: null });
+  assert.deepStrictEqual(parseEpisode('[Group] Show [1080].mkv'), { season: null, episode: null, absolute: null });
+});

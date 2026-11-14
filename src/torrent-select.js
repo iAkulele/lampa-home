@@ -8,6 +8,7 @@ import {
   SUBTITLE_PHRASES,
   SCREENER_MARKERS,
   DV_MARKERS,
+  DV_P5_MARKERS,
   HDR_MARKERS,
   SCORING,
 } from './config.js';
@@ -19,6 +20,7 @@ const RE_RUSSIAN = re(RUSSIAN_MARKERS);
 const RE_SUBS = re(SUBTITLE_PHRASES);
 const RE_SCREENER = re(SCREENER_MARKERS);
 const RE_DV = re(DV_MARKERS);
+const RE_DV_P5 = re(DV_P5_MARKERS);
 const RE_HDR = re(HDR_MARKERS);
 const STUDIO_RES = Object.entries(VOICE_STUDIOS).map(([id, src]) => [id, re(src)]);
 
@@ -52,7 +54,8 @@ function detectVoice(t, studio, audioText) {
   return RE_RUSSIAN.test(audioText) ? 'other' : null;
 }
 
-// Seasons covered by the title: S01-S03, S02, "Сезон 2", "Сезон: 1-3".
+// Seasons covered by the title: S01-S03, S02, "Сезон 2", "Сезон: 1-3",
+// "Season 3", "2nd Season", "TV-2".
 function detectSeasons(t) {
   const out = new Set();
   const add = (a, b) => {
@@ -61,6 +64,12 @@ function detectSeasons(t) {
   let m;
   const sx = /(?<![\p{L}\d])s(\d{1,2})(?:\s*-\s*s?(\d{1,2}))?(?![\d])(?!e\d)/giu;
   while ((m = sx.exec(t))) add(+m[1], m[2] ? +m[2] : +m[1]);
+  const en = /(?<![\p{L}\d])season\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?(?![\d])/giu;
+  while ((m = en.exec(t))) add(+m[1], m[2] ? +m[2] : +m[1]);
+  const nth = /(?<![\p{L}\d])(\d{1,2})(?:st|nd|rd|th)\s+season/giu;
+  while ((m = nth.exec(t))) add(+m[1], +m[1]);
+  const tv = /(?<![\p{L}\d])tv-?(\d{1,2})(?![\d])/giu;
+  while ((m = tv.exec(t))) add(+m[1], +m[1]);
   // "4 сезон: 1-8 серии", "1-3 сезоны": the number before the word wins, and then
   // the digits after "сезон:" are episodes, not seasons.
   const before = /(?<![\p{L}\d])(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*сезон/giu;
@@ -101,12 +110,13 @@ export function parseTitle(title) {
   const studio = detectStudio(t);
   const hdr = RE_HDR.test(t);
   const dv = RE_DV.test(t);
+  const dvP5 = dv && RE_DV_P5.test(t);
   const range = detectEpisodeRange(t);
   const ep = parseEpisode(t);
   return {
     resolution: detectResolution(t),
     screener: RE_SCREENER.test(t),
-    dvOnly: dv && !hdr,
+    dvOnly: dv && (dvP5 || !hdr),
     hdr,
     russian: RE_RUSSIAN.test(audioText) || studio !== null,
     voice: detectVoice(t, studio, audioText),
