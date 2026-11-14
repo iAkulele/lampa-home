@@ -1011,8 +1011,8 @@
       finish();
       if (movie.id) L.Favorite.add("history", movie, 100);
       playingId = kind === "movie" ? null : card.id;
-      const start2 = { ...element, playlist };
-      L.Player.play(start2);
+      const start3 = { ...element, playlist };
+      L.Player.play(start3);
       L.Player.playlist(playlist);
       L.Player.callback(() => L.Controller.toggle("content"));
       if (kind !== "movie") {
@@ -1508,6 +1508,66 @@
     }
   }
 
+  // src/notify.js
+  var TOAST_MS = 5e3;
+  var START_DELAY_MS = 3e3;
+  var IN_FLIGHT = 6;
+  function diffNewEpisodes(items, seenGetter) {
+    const out = [];
+    for (const { card, status } of items) {
+      if (!status || !status.airing) continue;
+      const seen = seenGetter(card.id);
+      if (seen != null && status.aired > seen) out.push({ id: card.id, aired: status.aired, card });
+    }
+    return out;
+  }
+  function toastLines(newItems) {
+    const lines = newItems.slice(0, LIMITS.maxToasts).map((n) => `\u0412\u044B\u0448\u043B\u0430 ${n.aired} \u0441\u0435\u0440\u0438\u044F: ${n.card.name || n.card.original_name || ""}`);
+    if (newItems.length > LIMITS.maxToasts) lines.push(`\u0438 \u0435\u0449\u0451 ${newItems.length - LIMITS.maxToasts}`);
+    return lines;
+  }
+  function candidates() {
+    const byId = /* @__PURE__ */ new Map();
+    for (const type of ["history", "book"]) {
+      let list = [];
+      try {
+        list = favoriteGet({ type });
+      } catch (e) {
+        list = [];
+      }
+      for (const card of list || []) {
+        if (card && card.id != null && !byId.has(card.id) && detectKind(card) === "anime") byId.set(card.id, card);
+      }
+    }
+    return [...byId.values()];
+  }
+  async function checkNewEpisodes() {
+    const run2 = createQueue(IN_FLIGHT);
+    const items = await Promise.all(
+      candidates().map((card) => run2(() => tvStatus(card.id)).then((status) => ({ card, status }), () => ({ card, status: null })))
+    );
+    const fresh = diffNewEpisodes(items, (id) => store.seen.get(id));
+    for (const { card, status } of items) if (status) store.seen.set(card.id, status.aired);
+    return fresh;
+  }
+  async function check() {
+    try {
+      if (storageField("lh_notify") === false) return;
+      if (!store.notify.due()) return;
+      const fresh = await checkNewEpisodes();
+      store.notify.mark();
+      for (const line of toastLines(fresh)) lampa().Noty.show(line, { time: TOAST_MS });
+    } catch (e) {
+      console.log("lampa-home notify", e);
+    }
+  }
+  function start() {
+    try {
+      setTimeout(check, START_DELAY_MS);
+    } catch (e) {
+    }
+  }
+
   // src/index.js
   var PLUGIN = "lampa-home";
   var VERSION = "0.1.0";
@@ -1529,9 +1589,10 @@
     register();
     init();
     init2();
+    start();
     console.log(PLUGIN, VERSION, "loaded");
   }
-  function start() {
+  function start2() {
     if (!guard()) {
       Lampa.Noty.show("Lampa Home: \u043D\u0435\u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F Lampa");
       return;
@@ -1541,9 +1602,9 @@
   if (window.lampa_home_ready) {
   } else {
     window.lampa_home_ready = true;
-    if (window.appready) start();
+    if (window.appready) start2();
     else Lampa.Listener.follow("app", (e) => {
-      if (e.type == "ready") start();
+      if (e.type == "ready") start2();
     });
   }
 })();
