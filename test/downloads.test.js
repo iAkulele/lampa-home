@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { preloadProgress, cardSnapshot, badgeLabel } from '../src/downloads.js';
+import { preloadProgress, cardSnapshot, badgeLabel, replacePlan } from '../src/downloads.js';
 
 const MiB = 1024 ** 2;
 const files = [
@@ -47,4 +47,14 @@ test('test_badge_label', () => {
   assert.strictEqual(badgeLabel({ percent: 45, done: false }), 'Качается 45 %');
   assert.strictEqual(badgeLabel({ percent: 100, done: true }), 'Скачано');
   assert.strictEqual(badgeLabel(null), '');
+});
+
+test('test_replace_plan', () => {
+  const h1 = '1'.repeat(40);
+  const h2 = '2'.repeat(40);
+  assert.strictEqual(replacePlan(null, h1), 'new');
+  assert.strictEqual(replacePlan({ hash: h1 }, h1), 'same');
+  assert.strictEqual(replacePlan({ hash: h1 }, h2), 'replace');
+  // An entry without a hash has nothing on disk to remove.
+  assert.strictEqual(replacePlan({}, h1), 'new');
 });

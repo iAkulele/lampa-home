@@ -4,7 +4,7 @@
 // helper on the PC (helper/ts-clean.js): TorrServer itself cannot delete its cache
 // folder without changing its settings, which the plugin never does.
 import { lampa, store, storageField } from './lampa.js';
-import { resolveTarget, searchTorrents, buildSearchParams, pickFile, startFromHash } from './play.js';
+import { resolveTarget, searchTorrents, buildSearchParams, pickFile, startFromHash, isBusy } from './play.js';
 import { selectTorrent } from './torrent-select.js';
 import { toWideCard, applyPosterClass } from './cards.js';
 import { createQueue } from './queue.js';
@@ -18,6 +18,7 @@ const POLL_MS = 5000;
 const FILES_EVERY_MS = 2000;
 const FILES_TRIES = 30;
 const PRELOAD_ABORT_MS = 3000;
+const HELPER_TIMEOUT_MS = 10000;
 
 const MSG = {
   search: 'Ищу раздачу…',
@@ -32,6 +33,9 @@ const MSG = {
   noFiles: 'TorrServer не получил список файлов',
   helper: 'Помощник на ПК недоступен',
   removed: 'Удалено с диска',
+  removing: 'Удаляю с диска…',
+  replaced: 'Прежняя закачка удалена',
+  replaceFailed: 'Помощник на ПК недоступен: прежняя закачка не удалена, новая не начата',
   confirm: 'Удалить с диска?',
 };
 
@@ -60,6 +64,13 @@ export function cardSnapshot(card) {
   }
   if (!out.genre_ids && Array.isArray(card.genres)) out.genre_ids = card.genres.map((g) => g && g.id).filter((id) => id != null);
   return out;
+}
+
+// What to do with an earlier download of the same card when a new one is started:
+// 'new' (none), 'same' (same release again) or 'replace' (delete the old one first).
+export function replacePlan(existing, newHash) {
+  if (!existing || !existing.hash) return 'new';
+  return existing.hash === newHash ? 'same' : 'replace';
 }
 
 export function badgeLabel(progress) {
@@ -126,6 +137,29 @@ async function waitFiles(hash, job) {
   throw fail(MSG.noFiles);
 }
 
+// Removes a torrent from TorrServer (rem; settings are never touched). Errors ignored.
+function tsRem(hash) {
+  return tsTorrents({ action: 'rem', hash }).catch(() => {});
+}
+
+// POST <helper>/delete {hash}; throws on any failure. Times out after 10 s.
+async function helperDelete(hash) {
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl && setTimeout(() => ctrl.abort(), HELPER_TIMEOUT_MS);
+  try {
+    const res = await fetch(helperUrl() + '/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hash }),
+      signal: ctrl && ctrl.signal,
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json || !json.ok) throw new Error((json && json.error) || String(res.status));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function helperUrl() {
   const v = lampa().Storage.get('lh_helper_url', HELPER_DEFAULT);
   return String(v || HELPER_DEFAULT).trim().replace(/\/+$/, '');
@@ -137,15 +171,24 @@ let busy = false;
 
 export async function preload(card) {
   const L = lampa();
-  if (!card || busy) return;
+  if (!card || busy || isBusy()) return;
   busy = true;
-  const job = { cancelled: false };
+  // hash: added to TorrServer by us; kicked: the preload started (it is ours to keep).
+  const job = { cancelled: false, hash: null, kicked: false };
+  // A torrent we added but never started preloading is removed again, unless it
+  // is the one an existing download already uses.
+  const dropAdded = () => {
+    if (!job.hash || job.kicked) return;
+    if (store.preload.all().some((e) => e.hash === job.hash)) return;
+    tsRem(job.hash);
+  };
   const finish = () => {
     busy = false;
     L.Loading.stop();
   };
   L.Loading.start(() => {
     job.cancelled = true;
+    dropAdded();
     finish();
   }, MSG.search);
   try {
@@ -170,7 +213,8 @@ export async function preload(card) {
     });
     const hash = added && added.hash;
     if (!hash) throw fail(MSG.torrserver);
-    if (job.cancelled) return;
+    job.hash = hash;
+    if (job.cancelled) return dropAdded();
 
     L.Loading.setText(MSG.files);
     const files = await waitFiles(hash, job);
@@ -178,8 +222,25 @@ export async function preload(card) {
     const file = pickFile(files, ctx);
     if (!file) throw fail(MSG.noFile);
 
+    const key = entryKey(movie);
+    const existing = store.preload.get(key);
+    let replaced = false;
+    if (replacePlan(existing, hash) === 'replace') {
+      L.Loading.setText(MSG.removing);
+      try {
+        await helperDelete(existing.hash);
+      } catch (e) {
+        console.log('lampa-home', 'helper delete failed', e && e.message);
+        throw fail(MSG.replaceFailed);
+      }
+      store.preload.remove(key);
+      replaced = true;
+    }
+    if (job.cancelled) return;
+
+    job.kicked = true;
     firePreload(hash, file.id);
-    store.preload.set(entryKey(movie), {
+    store.preload.set(key, {
       hash,
       index: file.id,
       title: chosen.Title,
@@ -193,9 +254,10 @@ export async function preload(card) {
     });
     console.log('lampa-home', 'preload', ctx, chosen.Title, hash, file.id);
     finish();
-    L.Noty.show(MSG.started);
+    L.Noty.show(replaced ? `${MSG.replaced}. ${MSG.started}` : MSG.started);
   } catch (err) {
     if (job.cancelled) return;
+    dropAdded();
     finish();
     if (!(err instanceof DlError)) console.error('lampa-home preload', err);
     L.Noty.show(err instanceof DlError ? err.message : MSG.torrserver);
@@ -215,19 +277,18 @@ export async function remove(cardId) {
   const L = lampa();
   const entry = store.preload.get(cardId);
   if (!entry) return true;
+  // The helper waits ~2 s for TorrServer; Back only hides the loader, the request
+  // itself still ends within 10 s.
+  L.Loading.start(() => L.Loading.stop(), MSG.removing);
   try {
-    const res = await fetch(helperUrl() + '/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hash: entry.hash }),
-    });
-    const json = await res.json().catch(() => null);
-    if (!res.ok || !json || !json.ok) throw new Error((json && json.error) || String(res.status));
+    await helperDelete(entry.hash);
   } catch (e) {
     console.log('lampa-home', 'helper delete failed', e && e.message);
+    L.Loading.stop();
     L.Noty.show(MSG.helper);
     return false;
   }
+  L.Loading.stop();
   store.preload.remove(cardId);
   L.Noty.show(MSG.removed);
   return true;

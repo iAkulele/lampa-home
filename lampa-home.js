@@ -179,11 +179,10 @@
 }
 
 /* Card page: our \xAB\u0418\u0433\u0440\u0430\u0442\u044C\xBB button, first in the buttons row. */
-.full-start__button.lh-play {
-  font-weight: 700;
-  background-color: rgba(255, 255, 255, 0.18);
-}
+/* White with a black icon in both states; Lampa still hides the text until focus. */
+.full-start__button.lh-play,
 .full-start__button.lh-play.focus {
+  font-weight: 700;
   background-color: #fff;
   color: #000;
 }
@@ -1043,6 +1042,7 @@
     L.Activity.push({ url: "", title: L.Lang.translate("title_torrents"), component: "torrents", ...params });
   }
   var current = null;
+  var isBusy = () => !!current;
   var playingId = null;
   function isWatchedIn(movie) {
     const L = lampa();
@@ -1174,13 +1174,14 @@
       L.Noty.show(err instanceof PlayError ? err.message : MSG.unknown);
     }
   }
+  var PLAY_ICON = '<svg viewBox="0 0 28 29" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14.5" r="13" stroke="currentColor" stroke-width="2.7"></circle><path d="M18.0739 13.634C18.7406 14.0189 18.7406 14.9811 18.0739 15.366L11.751 19.0166C11.0843 19.4015 10.251 18.9204 10.251 18.1506L10.251 10.8494C10.251 10.0796 11.0843 9.5985 11.751 9.9834L18.0739 13.634Z" fill="currentColor"></path></svg>';
   function addButton(e) {
     const card = e.data && e.data.movie;
     if (!card || !e.body) return;
     let row = e.body.find(".full-start-new__buttons");
     if (!row.length) row = e.body.find(".full-start__buttons");
     if (!row.length || row.find(".lh-play").length) return;
-    const btn = $('<div class="full-start__button selector lh-play"><span>\u0418\u0433\u0440\u0430\u0442\u044C</span></div>');
+    const btn = $(`<div class="full-start__button selector lh-play">${PLAY_ICON}<span>\u0418\u0433\u0440\u0430\u0442\u044C</span></div>`);
     btn.on("hover:enter", () => run(card));
     row.first().prepend(btn);
   }
@@ -1612,6 +1613,7 @@
   var FILES_EVERY_MS2 = 2e3;
   var FILES_TRIES2 = 30;
   var PRELOAD_ABORT_MS = 3e3;
+  var HELPER_TIMEOUT_MS = 1e4;
   var MSG2 = {
     search: "\u0418\u0449\u0443 \u0440\u0430\u0437\u0434\u0430\u0447\u0443\u2026",
     server: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u0432 TorrServer\u2026",
@@ -1625,6 +1627,9 @@
     noFiles: "TorrServer \u043D\u0435 \u043F\u043E\u043B\u0443\u0447\u0438\u043B \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432",
     helper: "\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043D\u0430 \u041F\u041A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
     removed: "\u0423\u0434\u0430\u043B\u0435\u043D\u043E \u0441 \u0434\u0438\u0441\u043A\u0430",
+    removing: "\u0423\u0434\u0430\u043B\u044F\u044E \u0441 \u0434\u0438\u0441\u043A\u0430\u2026",
+    replaced: "\u041F\u0440\u0435\u0436\u043D\u044F\u044F \u0437\u0430\u043A\u0430\u0447\u043A\u0430 \u0443\u0434\u0430\u043B\u0435\u043D\u0430",
+    replaceFailed: "\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043D\u0430 \u041F\u041A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D: \u043F\u0440\u0435\u0436\u043D\u044F\u044F \u0437\u0430\u043A\u0430\u0447\u043A\u0430 \u043D\u0435 \u0443\u0434\u0430\u043B\u0435\u043D\u0430, \u043D\u043E\u0432\u0430\u044F \u043D\u0435 \u043D\u0430\u0447\u0430\u0442\u0430",
     confirm: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441 \u0434\u0438\u0441\u043A\u0430?"
   };
   var SNAPSHOT_FIELDS = [
@@ -1657,6 +1662,10 @@
     }
     if (!out.genre_ids && Array.isArray(card.genres)) out.genre_ids = card.genres.map((g) => g && g.id).filter((id) => id != null);
     return out;
+  }
+  function replacePlan(existing, newHash) {
+    if (!existing || !existing.hash) return "new";
+    return existing.hash === newHash ? "same" : "replace";
   }
   function badgeLabel(progress) {
     if (!progress) return "";
@@ -1708,6 +1717,26 @@
     if (job.cancelled) return null;
     throw fail2(MSG2.noFiles);
   }
+  function tsRem(hash) {
+    return tsTorrents({ action: "rem", hash }).catch(() => {
+    });
+  }
+  async function helperDelete(hash) {
+    const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = ctrl && setTimeout(() => ctrl.abort(), HELPER_TIMEOUT_MS);
+    try {
+      const res = await fetch(helperUrl() + "/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hash }),
+        signal: ctrl && ctrl.signal
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json || !json.ok) throw new Error(json && json.error || String(res.status));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   function helperUrl() {
     const v = lampa().Storage.get("lh_helper_url", HELPER_DEFAULT);
     return String(v || HELPER_DEFAULT).trim().replace(/\/+$/, "");
@@ -1715,15 +1744,21 @@
   var busy = false;
   async function preload(card) {
     const L = lampa();
-    if (!card || busy) return;
+    if (!card || busy || isBusy()) return;
     busy = true;
-    const job = { cancelled: false };
+    const job = { cancelled: false, hash: null, kicked: false };
+    const dropAdded = () => {
+      if (!job.hash || job.kicked) return;
+      if (store.preload.all().some((e) => e.hash === job.hash)) return;
+      tsRem(job.hash);
+    };
     const finish = () => {
       busy = false;
       L.Loading.stop();
     };
     L.Loading.start(() => {
       job.cancelled = true;
+      dropAdded();
       finish();
     }, MSG2.search);
     try {
@@ -1747,14 +1782,31 @@
       });
       const hash = added && added.hash;
       if (!hash) throw fail2(MSG2.torrserver);
-      if (job.cancelled) return;
+      job.hash = hash;
+      if (job.cancelled) return dropAdded();
       L.Loading.setText(MSG2.files);
       const files = await waitFiles(hash, job);
       if (job.cancelled || !files) return;
       const file = pickFile(files, ctx);
       if (!file) throw fail2(MSG2.noFile);
+      const key = entryKey(movie);
+      const existing = store.preload.get(key);
+      let replaced = false;
+      if (replacePlan(existing, hash) === "replace") {
+        L.Loading.setText(MSG2.removing);
+        try {
+          await helperDelete(existing.hash);
+        } catch (e) {
+          console.log("lampa-home", "helper delete failed", e && e.message);
+          throw fail2(MSG2.replaceFailed);
+        }
+        store.preload.remove(key);
+        replaced = true;
+      }
+      if (job.cancelled) return;
+      job.kicked = true;
       firePreload(hash, file.id);
-      store.preload.set(entryKey(movie), {
+      store.preload.set(key, {
         hash,
         index: file.id,
         title: chosen.Title,
@@ -1768,9 +1820,10 @@
       });
       console.log("lampa-home", "preload", ctx, chosen.Title, hash, file.id);
       finish();
-      L.Noty.show(MSG2.started);
+      L.Noty.show(replaced ? `${MSG2.replaced}. ${MSG2.started}` : MSG2.started);
     } catch (err) {
       if (job.cancelled) return;
+      dropAdded();
       finish();
       if (!(err instanceof DlError)) console.error("lampa-home preload", err);
       L.Noty.show(err instanceof DlError ? err.message : MSG2.torrserver);
@@ -1786,19 +1839,16 @@
     const L = lampa();
     const entry = store.preload.get(cardId);
     if (!entry) return true;
+    L.Loading.start(() => L.Loading.stop(), MSG2.removing);
     try {
-      const res = await fetch(helperUrl() + "/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hash: entry.hash })
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json || !json.ok) throw new Error(json && json.error || String(res.status));
+      await helperDelete(entry.hash);
     } catch (e) {
       console.log("lampa-home", "helper delete failed", e && e.message);
+      L.Loading.stop();
       L.Noty.show(MSG2.helper);
       return false;
     }
+    L.Loading.stop();
     store.preload.remove(cardId);
     L.Noty.show(MSG2.removed);
     return true;
