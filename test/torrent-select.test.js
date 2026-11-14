@@ -177,3 +177,14 @@ test('test_rus_sub_plus_dub_is_ok', () => {
   const t = 'Фильм / Film (2024) 1080p | Дубляж | Rus Sub';
   assert.strictEqual(find(selectTorrent([item(t)], { kind: 'movie' }), t).rejected, null);
 });
+
+test('test_season_number_before_word', () => {
+  assert.deepStrictEqual(parseTitle('Пацаны (4 сезон: 1-8 серии из 8) / The Boys / 2024').seasons, [4]);
+  assert.deepStrictEqual(parseTitle('Пацаны (1-3 сезоны: 1-24 серии из 24) / The Boys').seasons, [1, 2, 3]);
+  assert.deepStrictEqual(parseTitle('Пацаны / The Boys / Сезон: 1 / Серии: 1-8 из 8').seasons, [1]);
+  const s4 = 'Пацаны (4 сезон: 1-8 серии из 8) / The Boys / 2024 / WEB-DL (1080p) | Дубляж';
+  const s1 = 'Пацаны (1 сезон: 1-8 серии из 8) / The Boys / 2019 / WEB-DL (1080p) | Дубляж';
+  const res = selectTorrent([item(s4, 200), item(s1, 20)], { kind: 'tv', season: 1, episode: 1, absolute: 1 });
+  assert.strictEqual(find(res, s4).rejected, 'episode-missing');
+  assert.strictEqual(res.chosen.Title, s1);
+});

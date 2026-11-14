@@ -134,3 +134,13 @@
 .menu__item.lh-hide {
   display: none !important;
 }
+
+/* Card page: our «Играть» button, first in the buttons row. */
+.full-start__button.lh-play {
+  font-weight: 700;
+  background-color: rgba(255, 255, 255, 0.18);
+}
+.full-start__button.lh-play.focus {
+  background-color: #fff;
+  color: #000;
+}

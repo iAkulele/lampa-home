@@ -61,8 +61,16 @@ function detectSeasons(t) {
   let m;
   const sx = /(?<![\p{L}\d])s(\d{1,2})(?:\s*-\s*s?(\d{1,2}))?(?![\d])(?!e\d)/giu;
   while ((m = sx.exec(t))) add(+m[1], m[2] ? +m[2] : +m[1]);
+  // "4 сезон: 1-8 серии", "1-3 сезоны": the number before the word wins, and then
+  // the digits after "сезон:" are episodes, not seasons.
+  const before = /(?<![\p{L}\d])(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*сезон/giu;
+  let prefixed = false;
+  while ((m = before.exec(t))) {
+    prefixed = true;
+    add(+m[1], m[2] ? +m[2] : +m[1]);
+  }
   const ru = /сезон[ы:]*\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?/giu;
-  while ((m = ru.exec(t))) add(+m[1], m[2] ? +m[2] : +m[1]);
+  while (!prefixed && (m = ru.exec(t))) add(+m[1], m[2] ? +m[2] : +m[1]);
   return out.size ? [...out].sort((a, b) => a - b) : null;
 }
 

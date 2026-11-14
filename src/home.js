@@ -1,5 +1,6 @@
 // Home screen component `lh_home`: six rows of wide cards instead of Lampa's main page.
-import { lampa, noty } from './lampa.js';
+import { lampa } from './lampa.js';
+import * as play from './play.js';
 import * as catalog from './catalog.js';
 import { ROWS } from './config.js';
 import { loadRow, todayIso, tvStatus } from './tmdb.js';
@@ -41,10 +42,7 @@ function createBanner(comp, card) {
     // Same as the row cards: respects the user's background setting.
     L.Background.change(L.Utils.cardImgBackground(card));
   });
-  html.find('.lh-banner__play').on('hover:enter', () => {
-    noty('Играть появится позже');
-    L.Router.call('full', card);
-  });
+  html.find('.lh-banner__play').on('hover:enter', () => play.run(card));
   html.find('.lh-banner__more').on('hover:enter', () => L.Router.call('full', card));
 
   return {
