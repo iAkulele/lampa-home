@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { toWideCard, rowTitle } from '../src/cards.js';
+import { toWideCard, rowTitle, hasRussianTitle } from '../src/cards.js';
 import { ROWS } from '../src/config.js';
 
 test('test_card_without_backdrop_gets_poster_fallback', () => {
@@ -59,4 +59,19 @@ test('test_apply_poster_class_marks_only_fallback_cards', async () => {
   const b = mk();
   applyPosterClass(b, {});
   assert.deepStrictEqual(b.classList.added, []);
+});
+
+test('test_has_russian_title_cyrillic', () => {
+  assert.strictEqual(hasRussianTitle({ title: 'Дюна' }), true);
+  assert.strictEqual(hasRussianTitle({ name: 'Слово пацана' }), true);
+});
+
+test('test_has_russian_title_original_ru', () => {
+  assert.strictEqual(hasRussianTitle({ title: 'Cheburashka', original_language: 'ru' }), true);
+});
+
+test('test_has_russian_title_rejects_latin_only', () => {
+  assert.strictEqual(hasRussianTitle({ title: 'Dune', original_language: 'en' }), false);
+  assert.strictEqual(hasRussianTitle({}), false);
+  assert.strictEqual(hasRussianTitle(null), false);
 });

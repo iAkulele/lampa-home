@@ -65,6 +65,13 @@ test('test_catalog_sort_rating_requires_votes', () => {
   assert.strictEqual(q.params.filter['vote_count.gte'], '100');
 });
 
+test('test_rows_have_vote_floor', () => {
+  const floors = { movies: '20', horror: '20', cartoons: '20', series: '5', anime: '5' };
+  for (const [row, v] of Object.entries(floors)) {
+    assert.strictEqual(rowQuery(row, TODAY).params.filter['vote_count.gte'], v, row);
+  }
+});
+
 test('test_catalog_year_filter', () => {
   const q = catalogQuery('movie', { genre: 28, year: 2024, sort: 'new' }, 2, TODAY);
   assert.strictEqual(q.params.filter.primary_release_year, 2024);

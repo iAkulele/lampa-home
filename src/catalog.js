@@ -2,7 +2,7 @@
 // cartoon / anime) with genre, year and sort chips above it.
 import { lampa, tmdbGet, store } from './lampa.js';
 import { catalogQuery, genresFor } from './tmdb-queries.js';
-import { toWideCard, applyPosterClass } from './cards.js';
+import { toWideCard, applyPosterClass, hasRussianTitle } from './cards.js';
 import { todayIso } from './tmdb.js';
 
 const NAME = 'lh_catalog';
@@ -92,7 +92,7 @@ function load(kind, f, page, seen, ok, fail) {
   tmdbGet(
     q.url,
     q.params,
-    (json) => ok({ ...json, results: dedupe((json && json.results) || [], seen).map(toWideCard) }),
+    (json) => ok({ ...json, results: dedupe(((json && json.results) || []).filter(hasRussianTitle), seen).map(toWideCard) }),
     fail,
   );
 }

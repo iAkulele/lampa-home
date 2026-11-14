@@ -13,6 +13,12 @@ export function rowTitle(rowKey) {
   return ROW_TITLES[rowKey] || rowKey;
 }
 
+// True when the card shows a Russian title: Cyrillic in the title, or a Russian original.
+export function hasRussianTitle(card) {
+  if (!card) return false;
+  return /[Ѐ-ӿ]/.test(card.title || card.name || '') || card.original_language === 'ru';
+}
+
 // Copy of a TMDB card rendered in Lampa's wide (16:9) style. Cards without a
 // backdrop fall back to the poster and are flagged so CSS can crop them.
 export function toWideCard(card) {

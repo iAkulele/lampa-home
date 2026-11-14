@@ -3,7 +3,7 @@ import { tmdbGet, favoriteGet, store } from './lampa.js';
 import { episodeStatus } from './episodes.js';
 import { createQueue } from './queue.js';
 import { rowQuery } from './tmdb-queries.js';
-import { rowTitle } from './cards.js';
+import { rowTitle, hasRussianTitle } from './cards.js';
 
 const HISTORY_LIMIT = 20;
 
@@ -34,7 +34,7 @@ export function loadRow(rowKey, today = todayIso()) {
   const q = rowQuery(rowKey, today);
   if (!q) return Promise.resolve(base);
   return get(q.url, { ...q.params, page: 1 }).then(
-    (json) => ({ ...base, results: (json && json.results) || [], total_pages: (json && json.total_pages) || 1 }),
+    (json) => ({ ...base, results: ((json && json.results) || []).filter(hasRussianTitle), total_pages: (json && json.total_pages) || 1 }),
     () => base,
   );
 }

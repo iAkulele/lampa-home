@@ -631,7 +631,8 @@
             sort_by: "primary_release_date.desc",
             filter: {
               ...movieFilter(today),
-              without_genres: `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`
+              without_genres: `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`,
+              "vote_count.gte": "20"
             }
           }
         };
@@ -641,7 +642,7 @@
           params: {
             genres: 27,
             sort_by: "primary_release_date.desc",
-            filter: movieFilter(today)
+            filter: { ...movieFilter(today), "vote_count.gte": "20" }
           }
         };
       case "anime":
@@ -650,7 +651,7 @@
           params: {
             genres: GENRE_ANIMATION,
             sort_by: "popularity.desc",
-            filter: { with_origin_country: "JP", "air_date.gte": daysAgo(today, 14) }
+            filter: { with_origin_country: "JP", "air_date.gte": daysAgo(today, 14), "vote_count.gte": "5" }
           }
         };
       case "series":
@@ -658,7 +659,11 @@
           url: "discover/tv",
           params: {
             sort_by: "popularity.desc",
-            filter: { without_genres: String(GENRE_ANIMATION), "air_date.gte": daysAgo(today, 30) }
+            filter: {
+              without_genres: String(GENRE_ANIMATION),
+              "air_date.gte": daysAgo(today, 30),
+              "vote_count.gte": "5"
+            }
           }
         };
       case "cartoons":
@@ -667,7 +672,7 @@
           params: {
             genres: GENRE_ANIMATION,
             sort_by: "primary_release_date.desc",
-            filter: movieFilter(today)
+            filter: { ...movieFilter(today), "vote_count.gte": "20" }
           }
         };
       default:
@@ -724,6 +729,10 @@
   function rowTitle(rowKey) {
     return ROW_TITLES[rowKey] || rowKey;
   }
+  function hasRussianTitle(card) {
+    if (!card) return false;
+    return /[Ѐ-ӿ]/.test(card.title || card.name || "") || card.original_language === "ru";
+  }
   function toWideCard(card) {
     const out = { ...card, params: { ...card.params || {}, style: { name: "wide" } } };
     if (!out.backdrop_path && out.poster_path) {
@@ -778,7 +787,7 @@
     const q = rowQuery(rowKey, today);
     if (!q) return Promise.resolve(base);
     return get(q.url, { ...q.params, page: 1 }).then(
-      (json) => ({ ...base, results: json && json.results || [], total_pages: json && json.total_pages || 1 }),
+      (json) => ({ ...base, results: (json && json.results || []).filter(hasRussianTitle), total_pages: json && json.total_pages || 1 }),
       () => base
     );
   }
@@ -1169,7 +1178,7 @@
     tmdbGet(
       q.url,
       q.params,
-      (json) => ok({ ...json, results: dedupe(json && json.results || [], seen).map(toWideCard) }),
+      (json) => ok({ ...json, results: dedupe((json && json.results || []).filter(hasRussianTitle), seen).map(toWideCard) }),
       fail2
     );
   }

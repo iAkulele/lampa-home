@@ -71,6 +71,7 @@ export function rowQuery(rowKey, today) {
           filter: {
             ...movieFilter(today),
             without_genres: `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`,
+            'vote_count.gte': '20',
           },
         },
       };
@@ -80,7 +81,7 @@ export function rowQuery(rowKey, today) {
         params: {
           genres: 27,
           sort_by: 'primary_release_date.desc',
-          filter: movieFilter(today),
+          filter: { ...movieFilter(today), 'vote_count.gte': '20' },
         },
       };
     case 'anime':
@@ -89,7 +90,7 @@ export function rowQuery(rowKey, today) {
         params: {
           genres: GENRE_ANIMATION,
           sort_by: 'popularity.desc',
-          filter: { with_origin_country: 'JP', 'air_date.gte': daysAgo(today, 14) },
+          filter: { with_origin_country: 'JP', 'air_date.gte': daysAgo(today, 14), 'vote_count.gte': '5' },
         },
       };
     case 'series':
@@ -99,7 +100,11 @@ export function rowQuery(rowKey, today) {
         url: 'discover/tv',
         params: {
           sort_by: 'popularity.desc',
-          filter: { without_genres: String(GENRE_ANIMATION), 'air_date.gte': daysAgo(today, 30) },
+          filter: {
+            without_genres: String(GENRE_ANIMATION),
+            'air_date.gte': daysAgo(today, 30),
+            'vote_count.gte': '5',
+          },
         },
       };
     case 'cartoons':
@@ -108,7 +113,7 @@ export function rowQuery(rowKey, today) {
         params: {
           genres: GENRE_ANIMATION,
           sort_by: 'primary_release_date.desc',
-          filter: movieFilter(today),
+          filter: { ...movieFilter(today), 'vote_count.gte': '20' },
         },
       };
     default:
