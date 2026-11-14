@@ -3,6 +3,7 @@ import { lampa, noty } from './lampa.js';
 import { ROWS } from './config.js';
 import { loadRow, todayIso } from './tmdb.js';
 import { toWideCard } from './cards.js';
+import { BANNER, bannerVars, genreMap } from './templates.js';
 
 const NAME = 'lh_home';
 const TITLE = 'Главная';
@@ -12,6 +13,64 @@ const MARKER = 'lh_home_live';
 // Until the catalog (Task 9) exists, "more" only announces it.
 function openCatalog(rowKey) {
   noty('Каталог: скоро');
+}
+
+// Source card of the banner: first card of the movies row, else of the first row.
+export function bannerCard(rows) {
+  const row = rows.find((r) => r.params.lh_row === 'movies') || rows[0];
+  return row && row.results[0];
+}
+
+// The hero banner as a pseudo-row of Main: Main navigates its `items` by index
+// (toggle / up / down), so the banner sits at items[0] with its own controller.
+function createBanner(comp, card) {
+  const L = lampa();
+  const vars = bannerVars(card, {
+    img: L.Api.img,
+    shortText: L.Utils.shortText,
+    genres: genreMap(L.Api.sources.tmdb.genres, L.Lang.translate),
+  });
+  const html = L.Template.get(BANNER, vars);
+  const el = html[0];
+  const path = card.backdrop_path || card.poster_path;
+  const background = path ? L.Api.img(path, 'w1280') : '';
+  let last = false;
+
+  html.find('.selector').on('hover:focus', function () {
+    last = this;
+    comp.scroll.update(el);
+    if (background) L.Background.change(background);
+  });
+  html.find('.lh-banner__play').on('hover:enter', () => {
+    noty('Играть появится позже');
+    L.Router.call('full', card);
+  });
+  html.find('.lh-banner__more').on('hover:enter', () => L.Router.call('full', card));
+
+  return {
+    toggle() {
+      L.Controller.add('lh_banner', {
+        link: this,
+        toggle: () => {
+          L.Controller.collectionSet(el);
+          L.Controller.collectionFocus(last, el);
+        },
+        left: () => {
+          if (Navigator.canmove('left')) Navigator.move('left');
+          else L.Controller.toggle('menu');
+        },
+        right: () => {
+          if (Navigator.canmove('right')) Navigator.move('right');
+        },
+        up: () => comp.emit('up'),
+        down: () => comp.emit('down'),
+        back: () => comp.emit('back'),
+      });
+      L.Controller.toggle('lh_banner');
+    },
+    render: (js) => (js ? el : html),
+    destroy: () => html.remove(),
+  };
 }
 
 export function buildRows(loaded) {
@@ -37,8 +96,12 @@ function component(object) {
       Promise.all(ROWS.map((key) => loadRow(key, today))).then((loaded) => {
         if (this.destroyed) return;
         const rows = buildRows(loaded);
-        if (rows.length) this.build(rows);
-        else this.empty();
+        if (!rows.length) return this.empty();
+        // Before build(): build() focuses items[active], which must be the banner.
+        const banner = createBanner(this, bannerCard(rows));
+        this.render(true).querySelector('.scroll__body').prepend(banner.render(true));
+        this.items.push(banner);
+        this.build(rows);
       }).catch(() => {
         if (!this.destroyed) this.empty();
       });

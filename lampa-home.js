@@ -1,6 +1,6 @@
 (() => {
   // src/styles.css
-  var styles_default = "/* Home rows: wide 16:9 cards, five per row plus a peek of the sixth.\n   Lampa sets body font-size = innerWidth / 84.17, so the layout is width-independent:\n   1.5em left offset + 5.5 x (14em card + 1em gap) ~= 84em. */\n.lh-home .card--wide {\n  width: 14em;\n}\n.lh-home .card--wide .card__view {\n  padding-bottom: 56.25%;\n}\n.lh-home .card--wide .card__img {\n  object-fit: cover;\n}\n/* Narrower than Lampa's own wide card (34.3em): keep only a compact title. */\n.lh-home .card--wide .card__promo {\n  padding: 1.5em 0.8em 0.7em 0.8em;\n}\n.lh-home .card--wide .card__promo-title {\n  font-size: 1.3em;\n  padding-right: 2.6em; /* room for the rating badge */\n}\n.lh-home .card--wide .card__promo-text {\n  display: none;\n}\n";
+  var styles_default = "/* Home rows: wide 16:9 cards, five per row plus a peek of the sixth.\n   Lampa sets body font-size = innerWidth / 84.17, so the layout is width-independent:\n   1.5em left offset + 5.5 x (14em card + 1em gap) ~= 84em. */\n.lh-home .card--wide {\n  width: 14em;\n}\n.lh-home .card--wide .card__view {\n  padding-bottom: 56.25%;\n}\n.lh-home .card--wide .card__img {\n  object-fit: cover;\n}\n/* Narrower than Lampa's own wide card (34.3em): keep only a compact title. */\n.lh-home .card--wide .card__promo {\n  padding: 1.5em 0.8em 0.7em 0.8em;\n}\n.lh-home .card--wide .card__promo-title {\n  font-size: 1.3em;\n  padding-right: 2.6em; /* room for the rating badge */\n}\n.lh-home .card--wide .card__promo-text {\n  display: none;\n}\n\n/* Hero banner above the rows: backdrop, left/bottom shade, text bottom-left. */\n.lh-home .lh-banner {\n  position: relative;\n  height: 45vh;\n  margin: 0 1.5em 1.5em 1.5em;\n  border-radius: 1em;\n  overflow: hidden;\n  background-color: #111;\n  background-size: cover;\n  background-position: center;\n}\n.lh-home .lh-banner__shade {\n  position: absolute;\n  inset: 0;\n  background:\n    linear-gradient(to right, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 45%, rgba(0, 0, 0, 0) 75%),\n    linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 55%);\n}\n.lh-home .lh-banner__body {\n  position: absolute;\n  left: 2em;\n  bottom: 2em;\n  width: 50%;\n  color: #fff;\n}\n.lh-home .lh-banner__title {\n  font-size: 2.6em;\n  font-weight: 700;\n  line-height: 1.1;\n  margin-bottom: 0.3em;\n}\n.lh-home .lh-banner__meta {\n  font-size: 1.1em;\n  opacity: 0.8;\n  margin-bottom: 0.6em;\n}\n.lh-home .lh-banner__overview {\n  font-size: 1.1em;\n  line-height: 1.4;\n  opacity: 0.9;\n  margin-bottom: 1.2em;\n  display: -webkit-box;\n  -webkit-line-clamp: 3;\n  -webkit-box-orient: vertical;\n  overflow: hidden;\n}\n.lh-home .lh-banner__buttons {\n  display: flex;\n  gap: 1em;\n}\n.lh-home .lh-banner__button {\n  padding: 0.6em 1.6em;\n  border-radius: 0.4em;\n  font-size: 1.2em;\n  font-weight: 600;\n  outline: 0.2em solid transparent;\n}\n.lh-home .lh-banner__play {\n  background: #fff;\n  color: #000;\n}\n.lh-home .lh-banner__more {\n  background: rgba(109, 109, 110, 0.7);\n  color: #fff;\n}\n.lh-home .lh-banner__button.focus {\n  outline-color: #fff;\n  outline-offset: 0.15em;\n}\n";
 
   // src/config.js
   var ROWS = ["movies", "horror", "anime", "series", "cartoons", "history"];
@@ -246,12 +246,109 @@
     );
   }
 
+  // src/templates.js
+  var BANNER = "lh_banner";
+  var BANNER_HTML = `<div class="lh-banner" style="background-image:url('{backdrop}')">
+  <div class="lh-banner__shade"></div>
+  <div class="lh-banner__body">
+    <div class="lh-banner__title">{title}</div>
+    <div class="lh-banner__meta">{meta}</div>
+    <div class="lh-banner__overview">{overview}</div>
+    <div class="lh-banner__buttons">
+      <div class="lh-banner__button lh-banner__play selector">&#9654; \u0418\u0433\u0440\u0430\u0442\u044C</div>
+      <div class="lh-banner__button lh-banner__more selector">\u041F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435</div>
+    </div>
+  </div>
+</div>`;
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/\$/g, "&#36;");
+  }
+  function genreMap(tmdbGenres, translate) {
+    const map = {};
+    if (!tmdbGenres) return map;
+    ["movie", "tv"].forEach((type) => {
+      (tmdbGenres[type] || []).forEach((g) => {
+        if (map[g.id]) return;
+        const name = String(translate(g.title) || "");
+        if (name) map[g.id] = name.charAt(0).toUpperCase() + name.slice(1);
+      });
+    });
+    return map;
+  }
+  function bannerVars(card, { img, shortText, genres = {} }) {
+    const date = card.release_date || card.first_air_date || "";
+    const genre = (card.genre_ids || []).map((id) => genres[id]).find(Boolean);
+    const rating = Number(card.vote_average) > 0 ? "\u2605 " + Number(card.vote_average).toFixed(1) : "";
+    const meta = [date.slice(0, 4), genre, rating].filter(Boolean).join(" \xB7 ");
+    const path = card.backdrop_path || card.poster_path;
+    return {
+      title: esc(card.title || card.name),
+      meta: esc(meta),
+      overview: esc(card.overview ? shortText(card.overview, 180) : ""),
+      backdrop: path ? esc(img(path, "w1280")) : ""
+    };
+  }
+  function register() {
+    lampa().Template.add(BANNER, BANNER_HTML);
+  }
+
   // src/home.js
   var NAME = "lh_home";
   var TITLE = "\u0413\u043B\u0430\u0432\u043D\u0430\u044F";
   var MARKER = "lh_home_live";
   function openCatalog(rowKey) {
     noty("\u041A\u0430\u0442\u0430\u043B\u043E\u0433: \u0441\u043A\u043E\u0440\u043E");
+  }
+  function bannerCard(rows) {
+    const row = rows.find((r) => r.params.lh_row === "movies") || rows[0];
+    return row && row.results[0];
+  }
+  function createBanner(comp, card) {
+    const L = lampa();
+    const vars = bannerVars(card, {
+      img: L.Api.img,
+      shortText: L.Utils.shortText,
+      genres: genreMap(L.Api.sources.tmdb.genres, L.Lang.translate)
+    });
+    const html = L.Template.get(BANNER, vars);
+    const el = html[0];
+    const path = card.backdrop_path || card.poster_path;
+    const background = path ? L.Api.img(path, "w1280") : "";
+    let last = false;
+    html.find(".selector").on("hover:focus", function() {
+      last = this;
+      comp.scroll.update(el);
+      if (background) L.Background.change(background);
+    });
+    html.find(".lh-banner__play").on("hover:enter", () => {
+      noty("\u0418\u0433\u0440\u0430\u0442\u044C \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u043F\u043E\u0437\u0436\u0435");
+      L.Router.call("full", card);
+    });
+    html.find(".lh-banner__more").on("hover:enter", () => L.Router.call("full", card));
+    return {
+      toggle() {
+        L.Controller.add("lh_banner", {
+          link: this,
+          toggle: () => {
+            L.Controller.collectionSet(el);
+            L.Controller.collectionFocus(last, el);
+          },
+          left: () => {
+            if (Navigator.canmove("left")) Navigator.move("left");
+            else L.Controller.toggle("menu");
+          },
+          right: () => {
+            if (Navigator.canmove("right")) Navigator.move("right");
+          },
+          up: () => comp.emit("up"),
+          down: () => comp.emit("down"),
+          back: () => comp.emit("back")
+        });
+        L.Controller.toggle("lh_banner");
+      },
+      render: (js) => js ? el : html,
+      destroy: () => html.remove()
+    };
   }
   function buildRows(loaded) {
     return loaded.filter((row) => row.results.length).map((row) => ({
@@ -272,8 +369,11 @@
         Promise.all(ROWS.map((key) => loadRow(key, today))).then((loaded) => {
           if (this.destroyed) return;
           const rows = buildRows(loaded);
-          if (rows.length) this.build(rows);
-          else this.empty();
+          if (!rows.length) return this.empty();
+          const banner = createBanner(this, bannerCard(rows));
+          this.render(true).querySelector(".scroll__body").prepend(banner.render(true));
+          this.items.push(banner);
+          this.build(rows);
         }).catch(() => {
           if (!this.destroyed) this.empty();
         });
@@ -301,7 +401,7 @@
     });
     return comp;
   }
-  function register() {
+  function register2() {
     lampa().Component.add(NAME, component);
   }
   function open() {
@@ -366,6 +466,7 @@
   function init2() {
     injectCss(styles_default);
     register();
+    register2();
     init();
     console.log(PLUGIN, VERSION, "loaded");
   }

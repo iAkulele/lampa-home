@@ -21,3 +21,73 @@
 .lh-home .card--wide .card__promo-text {
   display: none;
 }
+
+/* Hero banner above the rows: backdrop, left/bottom shade, text bottom-left. */
+.lh-home .lh-banner {
+  position: relative;
+  height: 45vh;
+  margin: 0 1.5em 1.5em 1.5em;
+  border-radius: 1em;
+  overflow: hidden;
+  background-color: #111;
+  background-size: cover;
+  background-position: center;
+}
+.lh-home .lh-banner__shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to right, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 45%, rgba(0, 0, 0, 0) 75%),
+    linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 55%);
+}
+.lh-home .lh-banner__body {
+  position: absolute;
+  left: 2em;
+  bottom: 2em;
+  width: 50%;
+  color: #fff;
+}
+.lh-home .lh-banner__title {
+  font-size: 2.6em;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-bottom: 0.3em;
+}
+.lh-home .lh-banner__meta {
+  font-size: 1.1em;
+  opacity: 0.8;
+  margin-bottom: 0.6em;
+}
+.lh-home .lh-banner__overview {
+  font-size: 1.1em;
+  line-height: 1.4;
+  opacity: 0.9;
+  margin-bottom: 1.2em;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lh-home .lh-banner__buttons {
+  display: flex;
+  gap: 1em;
+}
+.lh-home .lh-banner__button {
+  padding: 0.6em 1.6em;
+  border-radius: 0.4em;
+  font-size: 1.2em;
+  font-weight: 600;
+  outline: 0.2em solid transparent;
+}
+.lh-home .lh-banner__play {
+  background: #fff;
+  color: #000;
+}
+.lh-home .lh-banner__more {
+  background: rgba(109, 109, 110, 0.7);
+  color: #fff;
+}
+.lh-home .lh-banner__button.focus {
+  outline-color: #fff;
+  outline-offset: 0.15em;
+}
