@@ -5,8 +5,9 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const CORE = process.env.LAMPA_CORE || 'C:/Users/Akulele/AppData/Roaming/Lampa/lampa-core/3.4.7';
-// Static assets (jquery, navigator, fonts...) that the desktop core does not ship; read-only reference checkout.
-const PUBLIC = process.env.LAMPA_PUBLIC || 'C:/Users/Akulele/AppData/Local/Temp/claude/67192bcef9c345e1/ecf4856e-f3c5-4e86-aa6e-c05d7c646251/scratchpad/lampa-source/public';
+// Static assets (jquery, navigator, fonts...) that the desktop core does not ship.
+// Repo-local checkout made by `npm run dev:fetch` (fails if .lampa-source already exists).
+const PUBLIC = process.env.LAMPA_PUBLIC || path.join(ROOT, '.lampa-source', 'public');
 const PORT = 8099;
 
 const TYPES = { '.js': 'application/javascript', '.css': 'text/css', '.html': 'text/html; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf' };
