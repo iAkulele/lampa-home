@@ -1,5 +1,7 @@
 // Data loading for the home rows. Promise wrappers over Lampa's TMDB source.
-import { tmdbGet, favoriteGet } from './lampa.js';
+import { tmdbGet, favoriteGet, store } from './lampa.js';
+import { episodeStatus } from './episodes.js';
+import { createQueue } from './queue.js';
 import { rowQuery } from './tmdb-queries.js';
 import { rowTitle } from './cards.js';
 
@@ -39,4 +41,20 @@ export function loadRow(rowKey, today = todayIso()) {
 
 export function loadTv(tvId) {
   return get(`tv/${tvId}`, {});
+}
+
+const tvQueue = createQueue(6);
+
+// Never rejects: resolves with {season, aired, total, airing} or null on failure.
+export function tvStatus(tvId, today = todayIso()) {
+  const hit = store.tvcache.get(tvId);
+  if (hit) return Promise.resolve(hit.status);
+  return tvQueue(() => loadTv(tvId)).then(
+    (json) => {
+      const status = episodeStatus(json, today);
+      store.tvcache.set(tvId, status);
+      return status;
+    },
+    () => null,
+  );
 }

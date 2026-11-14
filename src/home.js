@@ -1,14 +1,20 @@
 // Home screen component `lh_home`: six rows of wide cards instead of Lampa's main page.
 import { lampa, noty } from './lampa.js';
 import { ROWS } from './config.js';
-import { loadRow, todayIso } from './tmdb.js';
-import { toWideCard } from './cards.js';
+import { loadRow, todayIso, tvStatus } from './tmdb.js';
+import { toWideCard, applyBadge } from './cards.js';
 import { BANNER, bannerVars, genreMap } from './templates.js';
 
 const NAME = 'lh_home';
 const TITLE = 'Главная';
 // Set on every live lh_home instance; menu.js uses it to tell ours from a nocomponent stub.
 const MARKER = 'lh_home_live';
+
+// Series and anime rows always get badges; history only for TV items.
+export function wantsBadge(rowKey, cardData) {
+  if (rowKey === 'anime' || rowKey === 'series') return true;
+  return rowKey === 'history' && !!cardData.original_name;
+}
 
 // Until the catalog (Task 9) exists, "more" only announces it.
 function openCatalog(rowKey) {
@@ -117,6 +123,17 @@ function component(object) {
         onInstance(card, cardData) {
           card.use({
             onEnter: L.Router.call.bind(L.Router, 'full', cardData),
+            onVisible() {
+              // Fires when the card scrolls into view; the queue in tvStatus caps requests.
+              if (this.lhBadged || !wantsBadge(rowKey, cardData)) return;
+              this.lhBadged = true;
+              tvStatus(cardData.id, todayIso()).then((status) => {
+                if (!this.destroyed) applyBadge(card.render(true), status);
+              });
+            },
+            onDestroy() {
+              this.destroyed = true;
+            },
             onFocus() {
               L.Background.change(L.Utils.cardImgBackground(cardData));
             },

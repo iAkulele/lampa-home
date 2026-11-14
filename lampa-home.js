@@ -1,6 +1,113 @@
 (() => {
   // src/styles.css
-  var styles_default = "/* Home rows: wide 16:9 cards, five per row plus a peek of the sixth.\n   Lampa sets body font-size = innerWidth / 84.17, so the layout is width-independent:\n   1.5em left offset + 5.5 x (14em card + 1em gap) ~= 84em. */\n.lh-home .card--wide {\n  width: 14em;\n}\n.lh-home .card--wide .card__view {\n  padding-bottom: 56.25%;\n}\n.lh-home .card--wide .card__img {\n  object-fit: cover;\n}\n/* Narrower than Lampa's own wide card (34.3em): keep only a compact title. */\n.lh-home .card--wide .card__promo {\n  padding: 1.5em 0.8em 0.7em 0.8em;\n}\n.lh-home .card--wide .card__promo-title {\n  font-size: 1.3em;\n  padding-right: 2.6em; /* room for the rating badge */\n}\n.lh-home .card--wide .card__promo-text {\n  display: none;\n}\n\n/* Hero banner above the rows: backdrop, left/bottom shade, text bottom-left. */\n.lh-home .lh-banner {\n  position: relative;\n  height: 45vh;\n  margin: 0 1.5em 1.5em 1.5em;\n  border-radius: 1em;\n  overflow: hidden;\n  background-color: #111;\n  background-size: cover;\n  background-position: center;\n}\n.lh-home .lh-banner__shade {\n  position: absolute;\n  inset: 0;\n  background:\n    linear-gradient(to right, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 45%, rgba(0, 0, 0, 0) 75%),\n    linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 55%);\n}\n.lh-home .lh-banner__body {\n  position: absolute;\n  left: 2em;\n  bottom: 2em;\n  width: 50%;\n  color: #fff;\n}\n.lh-home .lh-banner__title {\n  font-size: 2.6em;\n  font-weight: 700;\n  line-height: 1.1;\n  margin-bottom: 0.3em;\n}\n.lh-home .lh-banner__meta {\n  font-size: 1.1em;\n  opacity: 0.8;\n  margin-bottom: 0.6em;\n}\n.lh-home .lh-banner__overview {\n  font-size: 1.1em;\n  line-height: 1.4;\n  opacity: 0.9;\n  margin-bottom: 1.2em;\n  display: -webkit-box;\n  -webkit-line-clamp: 3;\n  -webkit-box-orient: vertical;\n  overflow: hidden;\n}\n.lh-home .lh-banner__buttons {\n  display: flex;\n  gap: 1em;\n}\n.lh-home .lh-banner__button {\n  padding: 0.6em 1.6em;\n  border-radius: 0.4em;\n  font-size: 1.2em;\n  font-weight: 600;\n  outline: 0.2em solid transparent;\n}\n.lh-home .lh-banner__play {\n  background: #fff;\n  color: #000;\n}\n.lh-home .lh-banner__more {\n  background: rgba(109, 109, 110, 0.7);\n  color: #fff;\n}\n.lh-home .lh-banner__button.focus {\n  outline-color: #fff;\n  outline-offset: 0.15em;\n}\n";
+  var styles_default = `/* Home rows: wide 16:9 cards, five per row plus a peek of the sixth.
+   Lampa sets body font-size = innerWidth / 84.17, so the layout is width-independent:
+   1.5em left offset + 5.5 x (14em card + 1em gap) ~= 84em. */
+.lh-home .card--wide {
+  width: 14em;
+}
+.lh-home .card--wide .card__view {
+  padding-bottom: 56.25%;
+}
+.lh-home .card--wide .card__img {
+  object-fit: cover;
+}
+/* Narrower than Lampa's own wide card (34.3em): keep only a compact title. */
+.lh-home .card--wide .card__promo {
+  padding: 1.5em 0.8em 0.7em 0.8em;
+}
+.lh-home .card--wide .card__promo-title {
+  font-size: 1.3em;
+  padding-right: 2.6em; /* room for the rating badge */
+}
+.lh-home .card--wide .card__promo-text {
+  display: none;
+}
+
+/* Hero banner above the rows: backdrop, left/bottom shade, text bottom-left. */
+.lh-home .lh-banner {
+  position: relative;
+  height: 45vh;
+  margin: 0 1.5em 1.5em 1.5em;
+  border-radius: 1em;
+  overflow: hidden;
+  background-color: #111;
+  background-size: cover;
+  background-position: center;
+}
+.lh-home .lh-banner__shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to right, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 45%, rgba(0, 0, 0, 0) 75%),
+    linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 55%);
+}
+.lh-home .lh-banner__body {
+  position: absolute;
+  left: 2em;
+  bottom: 2em;
+  width: 50%;
+  color: #fff;
+}
+.lh-home .lh-banner__title {
+  font-size: 2.6em;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-bottom: 0.3em;
+}
+.lh-home .lh-banner__meta {
+  font-size: 1.1em;
+  opacity: 0.8;
+  margin-bottom: 0.6em;
+}
+.lh-home .lh-banner__overview {
+  font-size: 1.1em;
+  line-height: 1.4;
+  opacity: 0.9;
+  margin-bottom: 1.2em;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lh-home .lh-banner__buttons {
+  display: flex;
+  gap: 1em;
+}
+.lh-home .lh-banner__button {
+  padding: 0.6em 1.6em;
+  border-radius: 0.4em;
+  font-size: 1.2em;
+  font-weight: 600;
+  outline: 0.2em solid transparent;
+}
+.lh-home .lh-banner__play {
+  background: #fff;
+  color: #000;
+}
+.lh-home .lh-banner__more {
+  background: rgba(109, 109, 110, 0.7);
+  color: #fff;
+}
+.lh-home .lh-banner__button.focus {
+  outline-color: #fff;
+  outline-offset: 0.15em;
+}
+
+/* Episode badge "7 \u0438\u0437 12" on series cards, loaded after render. */
+.lh-home .lh-badge {
+  position: absolute;
+  top: 0.4em;
+  left: 0.4em;
+  background: #2b2b2b;
+  border: 1px solid #555;
+  color: #fff;
+  font-size: 0.8em;
+  padding: 0.1em 0.4em;
+  border-radius: 0.2em;
+  z-index: 2;
+}
+`;
 
   // src/config.js
   var ROWS = ["movies", "horror", "anime", "series", "cartoons", "history"];
@@ -129,6 +236,45 @@
   var lampa = () => window.Lampa;
   var store = createStore(storage);
 
+  // src/episodes.js
+  var realSeasons = (seasons) => (seasons || []).filter((s) => s && s.season_number > 0).sort((a, b) => a.season_number - b.season_number);
+  var findSeason = (seasons, n) => realSeasons(seasons).find((s) => s.season_number === n);
+  function episodeStatus(tv, today) {
+    const list = realSeasons(tv && tv.seasons);
+    const last = tv && tv.last_episode_to_air;
+    const airing = !!tv && (tv.status === "Returning Series" || !!tv.next_episode_to_air);
+    if (!last) {
+      const s = list[list.length - 1];
+      const total2 = s ? s.episode_count : 0;
+      return { season: s ? s.season_number : 1, aired: total2, total: total2, airing };
+    }
+    const season = last.season_number;
+    const info = findSeason(list, season);
+    const total = info ? info.episode_count : last.episode_number;
+    const future = !!last.air_date && !!today && last.air_date > today;
+    const aired = future ? Math.max(0, last.episode_number - 1) : last.episode_number;
+    return { season, aired, total, airing };
+  }
+
+  // src/queue.js
+  function createQueue(limit) {
+    let active = 0;
+    const waiting = [];
+    const next = () => {
+      if (active >= limit || !waiting.length) return;
+      active++;
+      const { job, resolve, reject } = waiting.shift();
+      Promise.resolve().then(job).then(resolve, reject).finally(() => {
+        active--;
+        next();
+      });
+    };
+    return (job) => new Promise((resolve, reject) => {
+      waiting.push({ job, resolve, reject });
+      next();
+    });
+  }
+
   // src/tmdb-queries.js
   var GENRE_ANIMATION = 16;
   var GENRE_DOCUMENTARY = 99;
@@ -216,6 +362,18 @@
     }
     return out;
   }
+  function badgeText(status) {
+    return `${status.aired} \u0438\u0437 ${status.total}`;
+  }
+  function applyBadge(cardEl, status) {
+    if (!cardEl || !status || !status.total) return;
+    const view = cardEl.querySelector(".card__view");
+    if (!view || view.querySelector(".lh-badge")) return;
+    const el = document.createElement("div");
+    el.className = "lh-badge";
+    el.textContent = badgeText(status);
+    view.appendChild(el);
+  }
 
   // src/tmdb.js
   var HISTORY_LIMIT = 20;
@@ -243,6 +401,22 @@
     return get(q.url, { ...q.params, page: 1 }).then(
       (json) => ({ ...base, results: json && json.results || [], total_pages: json && json.total_pages || 1 }),
       () => base
+    );
+  }
+  function loadTv(tvId) {
+    return get(`tv/${tvId}`, {});
+  }
+  var tvQueue = createQueue(6);
+  function tvStatus(tvId, today = todayIso()) {
+    const hit = store.tvcache.get(tvId);
+    if (hit) return Promise.resolve(hit.status);
+    return tvQueue(() => loadTv(tvId)).then(
+      (json) => {
+        const status = episodeStatus(json, today);
+        store.tvcache.set(tvId, status);
+        return status;
+      },
+      () => null
     );
   }
 
@@ -304,6 +478,10 @@
   var NAME = "lh_home";
   var TITLE = "\u0413\u043B\u0430\u0432\u043D\u0430\u044F";
   var MARKER = "lh_home_live";
+  function wantsBadge(rowKey, cardData) {
+    if (rowKey === "anime" || rowKey === "series") return true;
+    return rowKey === "history" && !!cardData.original_name;
+  }
   function openCatalog(rowKey) {
     noty("\u041A\u0430\u0442\u0430\u043B\u043E\u0433: \u0441\u043A\u043E\u0440\u043E");
   }
@@ -396,6 +574,16 @@
           onInstance(card, cardData) {
             card.use({
               onEnter: L.Router.call.bind(L.Router, "full", cardData),
+              onVisible() {
+                if (this.lhBadged || !wantsBadge(rowKey, cardData)) return;
+                this.lhBadged = true;
+                tvStatus(cardData.id, todayIso()).then((status) => {
+                  if (!this.destroyed) applyBadge(card.render(true), status);
+                });
+              },
+              onDestroy() {
+                this.destroyed = true;
+              },
               onFocus() {
                 L.Background.change(L.Utils.cardImgBackground(cardData));
               }

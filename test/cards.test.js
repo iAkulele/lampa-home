@@ -29,3 +29,8 @@ test('test_row_titles_in_order', () => {
     'Недавно просмотренное',
   ]);
 });
+
+test('test_badge_text', async () => {
+  const { badgeText } = await import('../src/cards.js');
+  assert.strictEqual(badgeText({ aired: 7, total: 12 }), '7 из 12');
+});

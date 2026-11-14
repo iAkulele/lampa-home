@@ -23,3 +23,18 @@ export function toWideCard(card) {
   }
   return out;
 }
+
+export function badgeText(status) {
+  return `${status.aired} из ${status.total}`;
+}
+
+// Adds the "N из M" badge to a card element once; skipped without usable status.
+export function applyBadge(cardEl, status) {
+  if (!cardEl || !status || !status.total) return;
+  const view = cardEl.querySelector('.card__view');
+  if (!view || view.querySelector('.lh-badge')) return;
+  const el = document.createElement('div');
+  el.className = 'lh-badge';
+  el.textContent = badgeText(status);
+  view.appendChild(el);
+}
