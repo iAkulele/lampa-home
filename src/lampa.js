@@ -22,3 +22,5 @@ export const lampa = () => window.Lampa;
 
 // The single store instance shared by all UI modules.
 export const store = createStore(storage);
+
+export const storageField = (name) => window.Lampa.Storage.field(name);

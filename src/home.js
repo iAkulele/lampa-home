@@ -6,6 +6,8 @@ import { toWideCard } from './cards.js';
 
 const NAME = 'lh_home';
 const TITLE = 'Главная';
+// Set on every live lh_home instance; menu.js uses it to tell ours from a nocomponent stub.
+const MARKER = 'lh_home_live';
 
 // Until the catalog (Task 9) exists, "more" only announces it.
 function openCatalog(rowKey) {
@@ -26,6 +28,7 @@ export function buildRows(loaded) {
 function component(object) {
   const L = lampa();
   const comp = L.Maker.make('Main', object);
+  comp[MARKER] = true;
 
   comp.use({
     onCreate() {
@@ -36,6 +39,8 @@ function component(object) {
         const rows = buildRows(loaded);
         if (rows.length) this.build(rows);
         else this.empty();
+      }).catch(() => {
+        if (!this.destroyed) this.empty();
       });
     },
     onNext(resolve, reject) {
@@ -73,3 +78,4 @@ export function open() {
 
 export const COMPONENT = NAME;
 export const HOME_TITLE = TITLE;
+export { MARKER };

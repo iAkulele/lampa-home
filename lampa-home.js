@@ -249,6 +249,7 @@
   // src/home.js
   var NAME = "lh_home";
   var TITLE = "\u0413\u043B\u0430\u0432\u043D\u0430\u044F";
+  var MARKER = "lh_home_live";
   function openCatalog(rowKey) {
     noty("\u041A\u0430\u0442\u0430\u043B\u043E\u0433: \u0441\u043A\u043E\u0440\u043E");
   }
@@ -263,6 +264,7 @@
   function component(object) {
     const L = lampa();
     const comp = L.Maker.make("Main", object);
+    comp[MARKER] = true;
     comp.use({
       onCreate() {
         this.render(true).classList.add("lh-home");
@@ -272,6 +274,8 @@
           const rows = buildRows(loaded);
           if (rows.length) this.build(rows);
           else this.empty();
+        }).catch(() => {
+          if (!this.destroyed) this.empty();
         });
       },
       onNext(resolve, reject) {
@@ -307,17 +311,21 @@
   var HOME_TITLE = TITLE;
 
   // src/menu.js
-  function replaceMain() {
+  function needsSwap(active) {
+    if (!active) return false;
+    if (active.component === "main") return true;
+    if (active.component === COMPONENT) {
+      const comp = active.activity && active.activity.component;
+      return !(comp && comp[MARKER]);
+    }
+    return false;
+  }
+  function swapStart() {
     const L = lampa();
     const active = L.Activity.active();
-    if (!active || active.component !== "main") return false;
+    if (!needsSwap(active)) return false;
     const old = active.activity;
-    if (old) {
-      old.toggle = () => {
-      };
-      old.loader = () => {
-      };
-    }
+    if (old && typeof old.pause === "function") old.pause();
     L.Activity.replace({ component: COMPONENT, title: HOME_TITLE, source: "tmdb" });
     return true;
   }
@@ -330,12 +338,12 @@
       }
     });
     if (L.Activity.active()) {
-      replaceMain();
-    } else if (L.Storage.field("start_page") === "main") {
+      swapStart();
+    } else {
       const once = (e) => {
         if (e.type !== "start") return;
         L.Listener.remove("activity", once);
-        if (e.component === "main") setTimeout(replaceMain, 0);
+        setTimeout(swapStart, 0);
       };
       L.Listener.follow("activity", once);
     }
