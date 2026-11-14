@@ -733,6 +733,18 @@
     if (!card) return false;
     return /[Ѐ-ӿ]/.test(card.title || card.name || "") || card.original_language === "ru";
   }
+  async function fillPages(fetchPage, { min = 12, maxPages = 3, limit = 20 } = {}) {
+    let all = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const part = await fetchPage(page);
+      if (!part || !part.length) {
+        if (page > 1) break;
+      }
+      all = all.concat(part || []);
+      if (all.length >= min) break;
+    }
+    return all.slice(0, limit);
+  }
   function toWideCard(card) {
     const out = { ...card, params: { ...card.params || {}, style: { name: "wide" } } };
     if (!out.backdrop_path && out.poster_path) {
@@ -786,8 +798,16 @@
     }
     const q = rowQuery(rowKey, today);
     if (!q) return Promise.resolve(base);
-    return get(q.url, { ...q.params, page: 1 }).then(
-      (json) => ({ ...base, results: (json && json.results || []).filter(hasRussianTitle), total_pages: json && json.total_pages || 1 }),
+    let totalPages = 1;
+    const fetchPage = (page) => {
+      if (page > totalPages) return Promise.resolve([]);
+      return get(q.url, { ...q.params, page }).then((json) => {
+        if (page === 1) totalPages = json && json.total_pages || 1;
+        return (json && json.results || []).filter(hasRussianTitle);
+      });
+    };
+    return fillPages(fetchPage).then(
+      (results) => ({ ...base, results, total_pages: totalPages }),
       () => base
     );
   }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { toWideCard, rowTitle, hasRussianTitle } from '../src/cards.js';
+import { toWideCard, rowTitle, hasRussianTitle, fillPages } from '../src/cards.js';
 import { ROWS } from '../src/config.js';
 
 test('test_card_without_backdrop_gets_poster_fallback', () => {
@@ -74,4 +74,18 @@ test('test_has_russian_title_rejects_latin_only', () => {
   assert.strictEqual(hasRussianTitle({ title: 'Dune', original_language: 'en' }), false);
   assert.strictEqual(hasRussianTitle({}), false);
   assert.strictEqual(hasRussianTitle(null), false);
+});
+
+test('test_fill_pages_stops_when_enough', async () => {
+  const calls = [];
+  const res = await fillPages(async (p) => { calls.push(p); return Array(7).fill(p); });
+  assert.deepStrictEqual(calls, [1, 2]);
+  assert.strictEqual(res.length, 14);
+});
+
+test('test_fill_pages_stops_at_max_pages', async () => {
+  const calls = [];
+  const res = await fillPages(async (p) => { calls.push(p); return [p]; });
+  assert.deepStrictEqual(calls, [1, 2, 3]);
+  assert.strictEqual(res.length, 3);
 });

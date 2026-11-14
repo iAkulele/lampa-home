@@ -19,6 +19,21 @@ export function hasRussianTitle(card) {
   return /[Ѐ-ӿ]/.test(card.title || card.name || '') || card.original_language === 'ru';
 }
 
+// Fetches pages 1..maxPages until at least `min` cards are collected; returns up to `limit`.
+// fetchPage(page) -> Promise<card[]> (an empty array means no more pages).
+export async function fillPages(fetchPage, { min = 12, maxPages = 3, limit = 20 } = {}) {
+  let all = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const part = await fetchPage(page);
+    if (!part || !part.length) {
+      if (page > 1) break;
+    }
+    all = all.concat(part || []);
+    if (all.length >= min) break;
+  }
+  return all.slice(0, limit);
+}
+
 // Copy of a TMDB card rendered in Lampa's wide (16:9) style. Cards without a
 // backdrop fall back to the poster and are flagged so CSS can crop them.
 export function toWideCard(card) {
