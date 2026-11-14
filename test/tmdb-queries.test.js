@@ -87,3 +87,19 @@ test('test_catalog_anime_is_tv_jp', () => {
 test('test_genres_for_tv_has_horror', () => {
   assert.ok(genresFor('tv').some((g) => g.id === 'horror'));
 });
+
+test('test_catalog_anime_genre_is_anded_with_animation', () => {
+  const q = catalogQuery('anime', { genre: 35, year: null, sort: 'new' }, 1, TODAY);
+  assert.strictEqual(q.params.genres, '16,35');
+});
+
+test('test_catalog_cartoon_genre_is_anded_with_animation', () => {
+  const q = catalogQuery('cartoon', { genre: 12, year: null, sort: 'new' }, 1, TODAY);
+  assert.strictEqual(q.params.genres, '16,12');
+});
+
+test('test_genres_for_anime_excludes_animation', () => {
+  assert.ok(genresFor('anime').length > 0);
+  assert.ok(!genresFor('anime').some((g) => g.id === 16));
+  assert.ok(!genresFor('cartoon').some((g) => g.id === 16));
+});

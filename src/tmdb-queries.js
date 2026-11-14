@@ -40,7 +40,9 @@ const GENRE_DOCUMENTARY = 99;
 export function genresFor(kind) {
   if (kind === 'tv') return GENRES_TV;
   if (kind === 'movie') return GENRES_MOVIE;
-  return []; // anime / cartoon have a fixed genre
+  // anime is TV and cartoon is movie; animation (16) is already implied
+  const base = kind === 'anime' ? GENRES_TV : kind === 'cartoon' ? GENRES_MOVIE : [];
+  return base.filter((g) => g.id !== GENRE_ANIMATION);
 }
 
 // UTC arithmetic: immune to DST shifts.
@@ -116,16 +118,19 @@ export function rowQuery(rowKey, today) {
 
 // kind: 'movie' | 'tv' | 'cartoon' | 'anime'
 // filters: { genre: number|'horror'|null, year: number|null, sort: 'new'|'rating' }
-// For 'anime' and 'cartoon' the genre is fixed (16), so filters.genre is ignored.
+// For 'anime' and 'cartoon' genre 16 is always applied; a chosen genre is ANDed with it.
 export function catalogQuery(kind, filters, page, today) {
   const isTv = kind === 'tv' || kind === 'anime';
   const params = { page, filter: {} };
   const f = params.filter;
 
-  if (kind === 'anime' || kind === 'cartoon') {
-    params.genres = GENRE_ANIMATION;
-  } else if (filters.genre === 'horror') {
+  const fixed = kind === 'anime' || kind === 'cartoon';
+  if (filters.genre === 'horror') {
     params.keywords = GENRE_HORROR_TV_KEYWORDS.join('|');
+    if (fixed) params.genres = GENRE_ANIMATION;
+  } else if (fixed) {
+    // comma = AND in TMDB: animation AND the chosen genre
+    params.genres = filters.genre != null ? `${GENRE_ANIMATION},${filters.genre}` : GENRE_ANIMATION;
   } else if (filters.genre != null) {
     params.genres = filters.genre;
   }
