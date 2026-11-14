@@ -138,3 +138,42 @@ test('test_parse_title_real_names', () => {
   assert.deepStrictEqual(f.seasons, [2]);
   assert.strictEqual(f.voice, 'lostfilm');
 });
+
+test('test_rush_eng_is_not_russian', () => {
+  const t = 'Rush (2013) 1080p BluRay ENG';
+  assert.strictEqual(find(selectTorrent([item(t)], { kind: 'movie' }), t).rejected, 'no-russian');
+});
+
+test('test_russkiy_prefix_counts', () => {
+  const t = 'Фильм (2024) 1080p Русский дубляж';
+  assert.strictEqual(find(selectTorrent([item(t)], { kind: 'movie' }), t).rejected, null);
+});
+
+test('test_sxxexx_range_contains_episode', () => {
+  const t = 'Show S02E01-E10 1080p LostFilm';
+  const res = selectTorrent([item(t)], { kind: 'tv', season: 2, episode: 6 });
+  assert.strictEqual(find(res, t).rejected, null);
+});
+
+test('test_sxxexx_range_excludes_episode', () => {
+  const t = 'Show S02E01-E10 1080p LostFilm';
+  const res = selectTorrent([item(t)], { kind: 'tv', season: 2, episode: 11 });
+  assert.strictEqual(find(res, t).rejected, 'episode-missing');
+});
+
+test('test_rus_sub_only_is_rejected', () => {
+  for (const t of [
+    'Film (2024) 1080p WEB-DL ENG | Rus Sub',
+    'Film (2024) 1080p ENG RusSub',
+    'Film (2024) 1080p ENG Русские субтитры',
+    'Film (2024) 1080p ENG субтитры: рус',
+    'Film (2024) 1080p ENG Sub Rus',
+  ]) {
+    assert.strictEqual(find(selectTorrent([item(t)], { kind: 'movie' }), t).rejected, 'no-russian', t);
+  }
+});
+
+test('test_rus_sub_plus_dub_is_ok', () => {
+  const t = 'Фильм / Film (2024) 1080p | Дубляж | Rus Sub';
+  assert.strictEqual(find(selectTorrent([item(t)], { kind: 'movie' }), t).rejected, null);
+});

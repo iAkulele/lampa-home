@@ -42,7 +42,7 @@ export const VOICE_PREFERENCE = {
 // Markers of a Russian audio track (regex source). Plain English "dub" is
 // deliberately absent: a "Dub" release without RUS is not counted as Russian.
 export const RUSSIAN_MARKERS =
-  '(?<![\\p{L}\\d])(?:rus|рус)|дубляж|\\bmvo\\b|\\bdvo\\b|\\bavo\\b|многоголос|двухголос|одноголос|лицензия|itunes|\\bp[12]\\b|(?<![\\p{L}\\d])д(?![\\p{L}\\d])|лост';
+  '(?<![\\p{L}\\d])(?:rus(?![\\p{L}\\d])|рус)|дубляж|\\bmvo\\b|\\bdvo\\b|\\bavo\\b|многоголос|двухголос|одноголос|лицензия|itunes|\\bp[12]\\b|(?<![\\p{L}\\d])д(?![\\p{L}\\d])|лост';
 
 export const SCREENER_MARKERS =
   'camrip|\\bcam\\b|telesync|\\bts\\b|\\btc\\b|hdts|hdtc|telecine|экранк|\\bline\\b';
@@ -63,3 +63,8 @@ export const SCORING = {
   deadPenalty: 60,
   sizePenaltyPerGiB: 0.2,
 };
+
+// Subtitle-only mentions ("Rus Sub", "RusSub", "Sub Rus", "Русские субтитры",
+// "субтитры: рус"): stripped before Russian-audio detection.
+export const SUBTITLE_PHRASES =
+  '(?<![\\p{L}\\d])(?:rus|рус\\p{L}*)\\s*(?:sub\\p{L}*|субтитр\\p{L}*)|(?:sub\\p{L}*|субтитр\\p{L}*)[\\s:.\\-]*(?:rus(?![\\p{L}\\d])|рус\\p{L}*)';

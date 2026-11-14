@@ -5,6 +5,7 @@ import {
   VOICE_STUDIOS,
   VOICE_PREFERENCE,
   RUSSIAN_MARKERS,
+  SUBTITLE_PHRASES,
   SCREENER_MARKERS,
   DV_MARKERS,
   HDR_MARKERS,
@@ -15,6 +16,7 @@ const GiB = 1024 ** 3;
 const re = (src) => new RegExp(src, 'iu');
 
 const RE_RUSSIAN = re(RUSSIAN_MARKERS);
+const RE_SUBS = re(SUBTITLE_PHRASES);
 const RE_SCREENER = re(SCREENER_MARKERS);
 const RE_DV = re(DV_MARKERS);
 const RE_HDR = re(HDR_MARKERS);
@@ -42,12 +44,12 @@ function detectAudio(t) {
   return null;
 }
 
-function detectVoice(t, studio) {
+function detectVoice(t, studio, audioText) {
   if (studio === 'lostfilm' || studio === 'hdrezka' || studio === 'anidub') return studio;
   if (studio) return 'other';
   if (/дубляж|(?<![\p{L}\d])dub(?!bed)/iu.test(t)) return 'dub';
   if (/\bmvo\b|многоголос/i.test(t)) return 'mvo';
-  return RE_RUSSIAN.test(t) ? 'other' : null;
+  return RE_RUSSIAN.test(audioText) ? 'other' : null;
 }
 
 // Seasons covered by the title: S01-S03, S02, "Сезон 2", "Сезон: 1-3".
@@ -67,6 +69,7 @@ function detectSeasons(t) {
 // Episode range "1-6 из 8", "(1-4 of 10)", "[1090-1100]", "Серии: 1-10".
 function detectEpisodeRange(t) {
   const patterns = [
+    /(?<![\p{L}\d])e(\d{1,4})\s*-\s*e?(\d{1,4})(?!\d)/iu,
     /\[\s*(\d{1,4})\s*-\s*(\d{1,4})\s*\]/,
     /(\d{1,4})\s*-\s*(\d{1,4})\s*(?:of|из|серии|серий|episodes|eps)(?![\p{L}])/iu,
     /(?:серии|серия|episodes?|eps?)[\s:]*(\d{1,4})\s*-\s*(\d{1,4})/iu,
@@ -78,8 +81,15 @@ function detectEpisodeRange(t) {
   return null;
 }
 
+// "S02E01-E10", "S02E01-10": a multi-episode pack of one season.
+function detectSxeRange(t) {
+  const m = t.match(/(?<![\p{L}\d])s(\d{1,2})[ ._-]?e(\d{1,4})\s*-\s*e?(\d{1,4})(?!\d)/iu);
+  return m && +m[2] <= +m[3] ? { season: +m[1], range: [+m[2], +m[3]] } : null;
+}
+
 export function parseTitle(title) {
   const t = String(title || '');
+  const audioText = t.replace(RE_SUBS, ' ');
   const studio = detectStudio(t);
   const hdr = RE_HDR.test(t);
   const dv = RE_DV.test(t);
@@ -90,12 +100,13 @@ export function parseTitle(title) {
     screener: RE_SCREENER.test(t),
     dvOnly: dv && !hdr,
     hdr,
-    russian: RE_RUSSIAN.test(t) || studio !== null,
-    voice: detectVoice(t, studio),
+    russian: RE_RUSSIAN.test(audioText) || studio !== null,
+    voice: detectVoice(t, studio, audioText),
     studio,
     audio: detectAudio(t),
     seasons: detectSeasons(t),
     episodeRange: range,
+    sxeRange: detectSxeRange(t),
     episode: ep.episode == null ? null : ep,
   };
 }
@@ -106,6 +117,11 @@ function hasEpisode(p, ctx) {
   const wantAbs = ctx.absolute ?? ctx.episode ?? null;
   const inRange = (n) => n != null && p.episodeRange && n >= p.episodeRange[0] && n <= p.episodeRange[1];
 
+  if (p.sxeRange) {
+    const [a, b] = p.sxeRange.range;
+    return p.sxeRange.season === ctx.season && wantEp >= a && wantEp <= b;
+  }
+  if (p.episode && p.episode.season == null && p.episodeRange) return inRange(ctx.kind === 'anime' ? wantAbs : wantEp);
   if (p.episode) {
     if (p.episode.season != null) {
       return p.episode.season === ctx.season && p.episode.episode === wantEp;
