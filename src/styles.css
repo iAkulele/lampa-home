@@ -1,2 +1,23 @@
-.lh-home {
+/* Home rows: wide 16:9 cards, five per row plus a peek of the sixth.
+   Lampa sets body font-size = innerWidth / 84.17, so the layout is width-independent:
+   1.5em left offset + 5.5 x (14em card + 1em gap) ~= 84em. */
+.lh-home .card--wide {
+  width: 14em;
+}
+.lh-home .card--wide .card__view {
+  padding-bottom: 56.25%;
+}
+.lh-home .card--wide .card__img {
+  object-fit: cover;
+}
+/* Narrower than Lampa's own wide card (34.3em): keep only a compact title. */
+.lh-home .card--wide .card__promo {
+  padding: 1.5em 0.8em 0.7em 0.8em;
+}
+.lh-home .card--wide .card__promo-title {
+  font-size: 1.3em;
+  padding-right: 2.6em; /* room for the rating badge */
+}
+.lh-home .card--wide .card__promo-text {
+  display: none;
 }
