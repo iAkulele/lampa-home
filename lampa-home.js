@@ -522,12 +522,13 @@
   var DECADES = ["2000-2009", "1990-1999"];
   var KIND_TITLES = { movie: "\u0424\u0438\u043B\u044C\u043C\u044B", tv: "\u0421\u0435\u0440\u0438\u0430\u043B\u044B", cartoon: "\u041C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B", anime: "\u0410\u043D\u0438\u043C\u0435" };
   var SORT_TITLES = { new: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u043E\u0432\u044B\u0435", rating: "\u041F\u043E \u0440\u0435\u0439\u0442\u0438\u043D\u0433\u0443" };
+  var FRESH = { genre: null, year: null, sort: "new" };
   var ROW_PRESETS = {
-    movies: { kind: "movie", preset: {} },
-    horror: { kind: "movie", preset: { genre: 27 } },
-    anime: { kind: "anime", preset: { sort: "new" } },
-    series: { kind: "tv", preset: {} },
-    cartoons: { kind: "cartoon", preset: {} }
+    movies: { kind: "movie", preset: FRESH },
+    horror: { kind: "movie", preset: { ...FRESH, genre: 27 } },
+    anime: { kind: "anime", preset: FRESH },
+    series: { kind: "tv", preset: FRESH },
+    cartoons: { kind: "cartoon", preset: FRESH }
   };
   function presetFor(rowKey) {
     const p = ROW_PRESETS[rowKey];
@@ -556,12 +557,31 @@
       sort: SORT_TITLES[f.sort] || SORT_TITLES.new
     };
   }
-  function load(kind, f, page, ok, fail) {
+  function guarded(comp, fn) {
+    return (...args) => {
+      if (!comp.destroyed) fn(...args);
+    };
+  }
+  function dedupe(results, seen) {
+    return results.filter((card) => {
+      if (!card || card.id == null) return true;
+      if (seen.has(card.id)) return false;
+      seen.add(card.id);
+      return true;
+    });
+  }
+  var nav = () => typeof Navigator !== "undefined" ? Navigator : null;
+  var canMove = (dir) => {
+    const n = nav();
+    return !!(n && n.canmove(dir));
+  };
+  var move = (dir) => nav().move(dir);
+  function load(kind, f, page, seen, ok, fail) {
     const q = catalogQuery(kind, f, page, todayIso());
     tmdbGet(
       q.url,
       q.params,
-      (json) => ok({ ...json, results: (json && json.results || []).map(toWideCard) }),
+      (json) => ok({ ...json, results: dedupe(json && json.results || [], seen).map(toWideCard) }),
       fail
     );
   }
@@ -575,6 +595,7 @@
     const head = document.createElement("div");
     head.className = "lh-catalog__head";
     let lastChip = false;
+    const seen = /* @__PURE__ */ new Set();
     function toggleFilter() {
       L.Controller.toggle(FILTER_CONTROLLER);
     }
@@ -630,11 +651,11 @@
         L.Controller.collectionFocus(lastChip, head);
       },
       left: () => {
-        if (Navigator.canmove("left")) Navigator.move("left");
+        if (canMove("left")) move("left");
         else L.Controller.toggle("menu");
       },
       right: () => {
-        if (Navigator.canmove("right")) Navigator.move("right");
+        if (canMove("right")) move("right");
       },
       up: () => L.Controller.toggle("head"),
       down: () => comp.start(),
@@ -647,14 +668,14 @@
         buildFilter();
         this.render(true).prepend(head);
         this.scroll.minus(head);
-        load(kind, f, 1, this.build.bind(this), this.empty.bind(this));
+        load(kind, f, 1, seen, guarded(this, this.build.bind(this)), guarded(this, this.empty.bind(this)));
       },
       onNext(resolve, reject) {
-        load(kind, f, object.page, resolve.bind(this), reject.bind(this));
+        load(kind, f, object.page, seen, guarded(this, resolve.bind(this)), guarded(this, reject.bind(this)));
       },
       onController(controller) {
         controller.up = () => {
-          if (Navigator.canmove("up")) Navigator.move("up");
+          if (canMove("up")) move("up");
           else toggleFilter();
         };
       },
@@ -677,6 +698,7 @@
         });
       },
       onDestroy() {
+        this.destroyed = true;
         filter.destroy();
         head.remove();
       }

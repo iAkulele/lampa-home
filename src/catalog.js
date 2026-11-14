@@ -17,12 +17,14 @@ export const KIND_TITLES = { movie: 'Фильмы', tv: 'Сериалы', cartoo
 const SORT_TITLES = { new: 'Сначала новые', rating: 'По рейтингу' };
 
 // Home row -> catalog kind and the filters it opens with. history has no catalog.
+// The rows are "new" lists, so their catalogs always open on sort 'new' with no year.
+const FRESH = { genre: null, year: null, sort: 'new' };
 const ROW_PRESETS = {
-  movies: { kind: 'movie', preset: {} },
-  horror: { kind: 'movie', preset: { genre: 27 } },
-  anime: { kind: 'anime', preset: { sort: 'new' } },
-  series: { kind: 'tv', preset: {} },
-  cartoons: { kind: 'cartoon', preset: {} },
+  movies: { kind: 'movie', preset: FRESH },
+  horror: { kind: 'movie', preset: { ...FRESH, genre: 27 } },
+  anime: { kind: 'anime', preset: FRESH },
+  series: { kind: 'tv', preset: FRESH },
+  cartoons: { kind: 'cartoon', preset: FRESH },
 };
 
 export function presetFor(rowKey) {
@@ -59,12 +61,38 @@ export function chosenLabels(kind, f) {
   };
 }
 
-function load(kind, f, page, ok, fail) {
+// Wraps a callback so it does nothing once comp is destroyed: a TMDB answer that
+// arrives after Back or a filter change must not toggle a dead activity.
+export function guarded(comp, fn) {
+  return (...args) => {
+    if (!comp.destroyed) fn(...args);
+  };
+}
+
+// Drops cards already shown (TMDB pages shift between requests); remembers new ids in seen.
+export function dedupe(results, seen) {
+  return results.filter((card) => {
+    if (!card || card.id == null) return true;
+    if (seen.has(card.id)) return false;
+    seen.add(card.id);
+    return true;
+  });
+}
+
+// Bare global of Lampa's keyboard navigator; absent outside the app.
+const nav = () => (typeof Navigator !== 'undefined' ? Navigator : null);
+const canMove = (dir) => {
+  const n = nav();
+  return !!(n && n.canmove(dir));
+};
+const move = (dir) => nav().move(dir);
+
+function load(kind, f, page, seen, ok, fail) {
   const q = catalogQuery(kind, f, page, todayIso());
   tmdbGet(
     q.url,
     q.params,
-    (json) => ok({ ...json, results: ((json && json.results) || []).map(toWideCard) }),
+    (json) => ok({ ...json, results: dedupe((json && json.results) || [], seen).map(toWideCard) }),
     fail,
   );
 }
@@ -80,6 +108,7 @@ function component(object) {
   const head = document.createElement('div');
   head.className = 'lh-catalog__head';
   let lastChip = false;
+  const seen = new Set(); // card ids already in the grid, across pages
 
   function toggleFilter() {
     L.Controller.toggle(FILTER_CONTROLLER);
@@ -144,11 +173,11 @@ function component(object) {
       L.Controller.collectionFocus(lastChip, head);
     },
     left: () => {
-      if (Navigator.canmove('left')) Navigator.move('left');
+      if (canMove('left')) move('left');
       else L.Controller.toggle('menu');
     },
     right: () => {
-      if (Navigator.canmove('right')) Navigator.move('right');
+      if (canMove('right')) move('right');
     },
     up: () => L.Controller.toggle('head'),
     down: () => comp.start(),
@@ -162,14 +191,14 @@ function component(object) {
       buildFilter();
       this.render(true).prepend(head);
       this.scroll.minus(head);
-      load(kind, f, 1, this.build.bind(this), this.empty.bind(this));
+      load(kind, f, 1, seen, guarded(this, this.build.bind(this)), guarded(this, this.empty.bind(this)));
     },
     onNext(resolve, reject) {
-      load(kind, f, object.page, resolve.bind(this), reject.bind(this));
+      load(kind, f, object.page, seen, guarded(this, resolve.bind(this)), guarded(this, reject.bind(this)));
     },
     onController(controller) {
       controller.up = () => {
-        if (Navigator.canmove('up')) Navigator.move('up');
+        if (canMove('up')) move('up');
         else toggleFilter();
       };
     },
@@ -193,6 +222,7 @@ function component(object) {
       });
     },
     onDestroy() {
+      this.destroyed = true;
       filter.destroy();
       head.remove();
     },

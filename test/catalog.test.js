@@ -1,13 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { presetFor, yearOptions, chosenLabels, genreName, applyPreset, KIND_TITLES } from '../src/catalog.js';
+import {
+  presetFor,
+  yearOptions,
+  chosenLabels,
+  genreName,
+  applyPreset,
+  guarded,
+  dedupe,
+  KIND_TITLES,
+} from '../src/catalog.js';
 
 test('test_preset_for_rows', () => {
-  assert.deepStrictEqual(presetFor('movies'), { kind: 'movie', preset: {} });
-  assert.deepStrictEqual(presetFor('horror'), { kind: 'movie', preset: { genre: 27 } });
-  assert.deepStrictEqual(presetFor('anime'), { kind: 'anime', preset: { sort: 'new' } });
-  assert.deepStrictEqual(presetFor('series'), { kind: 'tv', preset: {} });
-  assert.deepStrictEqual(presetFor('cartoons'), { kind: 'cartoon', preset: {} });
+  // Rows are "new" lists: their catalogs open on sort 'new' with no year.
+  const fresh = { genre: null, year: null, sort: 'new' };
+  assert.deepStrictEqual(presetFor('movies'), { kind: 'movie', preset: fresh });
+  assert.deepStrictEqual(presetFor('horror'), { kind: 'movie', preset: { ...fresh, genre: 27 } });
+  assert.deepStrictEqual(presetFor('anime'), { kind: 'anime', preset: fresh });
+  assert.deepStrictEqual(presetFor('series'), { kind: 'tv', preset: fresh });
+  assert.deepStrictEqual(presetFor('cartoons'), { kind: 'cartoon', preset: fresh });
   assert.strictEqual(presetFor('history'), null);
   assert.strictEqual(presetFor('nope'), null);
 });
@@ -48,4 +59,27 @@ test('test_genre_name_and_chosen_labels', () => {
 
 test('test_kind_titles', () => {
   assert.deepStrictEqual(KIND_TITLES, { movie: 'Фильмы', tv: 'Сериалы', cartoon: 'Мультфильмы', anime: 'Аниме' });
+});
+
+test('test_horror_preset_overrides_stored_sort_and_year', () => {
+  const stored = { genre: 35, year: 2020, sort: 'rating' };
+  assert.deepStrictEqual(applyPreset(stored, presetFor('horror').preset), { genre: 27, year: null, sort: 'new' });
+});
+
+test('test_guarded_drops_calls_after_destroy', () => {
+  const comp = { destroyed: false };
+  const calls = [];
+  const fn = guarded(comp, (x) => calls.push(x));
+  fn(1);
+  comp.destroyed = true;
+  fn(2);
+  assert.deepStrictEqual(calls, [1]);
+});
+
+test('test_dedupe_skips_ids_already_shown', () => {
+  const seen = new Set();
+  assert.deepStrictEqual(dedupe([{ id: 1 }, { id: 2 }], seen).map((c) => c.id), [1, 2]);
+  assert.deepStrictEqual(dedupe([{ id: 2 }, { id: 3 }, { id: 3 }], seen).map((c) => c.id), [3]);
+  // cards without an id are kept
+  assert.strictEqual(dedupe([{ title: 'x' }], seen).length, 1);
 });
