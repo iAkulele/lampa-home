@@ -47,6 +47,7 @@
 }
 .lh-home .card--wide .card__view {
   padding-bottom: 56.25%;
+  border-radius: 0.4em;
 }
 .lh-home .card--wide .card__img {
   object-fit: cover;
@@ -68,7 +69,7 @@
   position: relative;
   height: 45vh;
   margin: 0 1.5em 1.5em 1.5em;
-  border-radius: 1em;
+  border-radius: 0.4em;
   overflow: hidden;
   background-color: #111;
   background-size: cover;
@@ -156,6 +157,7 @@
 }
 .lh-catalog .card--wide .card__view {
   padding-bottom: 56.25%;
+  border-radius: 0.4em;
 }
 .lh-catalog .card--wide .card__img {
   object-fit: cover;
