@@ -131,6 +131,11 @@
 .lh-catalog .card--wide .card__promo-text {
   display: none;
 }
+
+/* Menu: only main / movie / tv / cartoon / anime / settings stay visible. */
+.menu__item.lh-hide {
+  display: none !important;
+}
 `;
 
   // src/config.js
@@ -906,6 +911,18 @@
 
   // src/menu.js
   var CATALOG_ACTIONS = ["movie", "tv", "cartoon", "anime"];
+  var KEEP_ACTIONS = ["main", "movie", "tv", "cartoon", "anime", "settings"];
+  var HIDE_CLASS = "lh-hide";
+  function shouldHide(action) {
+    return !KEEP_ACTIONS.includes(action);
+  }
+  function hideItems(root) {
+    if (!root || typeof root.find !== "function") return;
+    root.find(".menu__item").each(function() {
+      const el = window.$(this);
+      if (shouldHide(el.attr("data-action"))) el.addClass(HIDE_CLASS);
+    });
+  }
   function needsSwap(active) {
     if (!active) return false;
     if (active.component === "main") return true;
@@ -936,6 +953,20 @@
         open(e.action);
       }
     });
+    const $ = window.$;
+    const watch = (root) => {
+      hideItems(root);
+      if (typeof MutationObserver === "function" && root[0]) {
+        new MutationObserver(() => hideItems(root)).observe(root[0], { childList: true, subtree: true });
+      }
+    };
+    L.Listener.follow("menu", (e) => {
+      if (e.type === "start") watch(e.body);
+    });
+    L.Listener.follow("app", (e) => {
+      if (e.type === "ready") hideItems($(".menu"));
+    });
+    if ($(".menu").length) watch($(".menu"));
     if (L.Activity.active()) {
       swapStart();
     } else {

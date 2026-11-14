@@ -5,6 +5,24 @@ import * as home from './home.js';
 import * as catalog from './catalog.js';
 
 const CATALOG_ACTIONS = ['movie', 'tv', 'cartoon', 'anime'];
+const KEEP_ACTIONS = ['main', 'movie', 'tv', 'cartoon', 'anime', 'settings'];
+const HIDE_CLASS = 'lh-hide';
+
+// True for a menu action that is not one of the six items we keep.
+export function shouldHide(action) {
+  return !KEEP_ACTIONS.includes(action);
+}
+
+// Items added by other plugins (Sport, Shots) have no data-action and are hidden too.
+// Marks every unused menu item with a CSS class (Lampa's own menu_hide storage
+// is left alone). Idempotent: safe to call on any root, any number of times.
+export function hideItems(root) {
+  if (!root || typeof root.find !== 'function') return;
+  root.find('.menu__item').each(function () {
+    const el = window.$(this);
+    if (shouldHide(el.attr('data-action'))) el.addClass(HIDE_CLASS);
+  });
+}
 
 // True when the activity must be swapped for a live lh_home: it is Lampa's native
 // main page, or an lh_home restored by start_page='last' before the plugin
@@ -45,6 +63,24 @@ export function init() {
       catalog.open(e.action);
     }
   });
+
+  // Hide unused menu items: when the menu is built, once more when it is done
+  // (other plugins may add items) and once after the app is ready.
+  const $ = window.$;
+  // Plugins (Sport, Shots) add their items later still, so watch the menu too.
+  const watch = (root) => {
+    hideItems(root);
+    if (typeof MutationObserver === 'function' && root[0]) {
+      new MutationObserver(() => hideItems(root)).observe(root[0], { childList: true, subtree: true });
+    }
+  };
+  L.Listener.follow('menu', (e) => {
+    if (e.type === 'start') watch(e.body);
+  });
+  L.Listener.follow('app', (e) => {
+    if (e.type === 'ready') hideItems($('.menu'));
+  });
+  if ($('.menu').length) watch($('.menu'));
 
   // Start page: swap whatever the first activity is if it needs it, whatever
   // the start_page setting; if Lampa has not started one yet, catch the first.

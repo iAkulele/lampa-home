@@ -129,3 +129,8 @@
 .lh-catalog .card--wide .card__promo-text {
   display: none;
 }
+
+/* Menu: only main / movie / tv / cartoon / anime / settings stay visible. */
+.menu__item.lh-hide {
+  display: none !important;
+}
