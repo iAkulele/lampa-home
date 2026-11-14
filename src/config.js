@@ -7,6 +7,7 @@ export const STORAGE_KEYS = {
   tvcache: 'lh_tvcache',
   notifyAt: 'lh_notify_at',
   filters: 'lh_filters',
+  preload: 'lh_preload',
   settings: 'lh_settings',
 };
 

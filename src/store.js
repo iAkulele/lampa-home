@@ -1,0 +1,109 @@
+import { STORAGE_KEYS, LIMITS } from './config.js';
+
+const MAX_ENTRIES = 200;
+const DEFAULT_FILTER = { genre: null, year: null, sort: 'new' };
+
+// storage: {get(key, empty), set(key, value)}; values are plain JSON-able objects.
+export function createStore(storage, now = () => Date.now()) {
+  const read = (key) => {
+    const v = storage.get(key, {});
+    return v && typeof v === 'object' ? v : {};
+  };
+
+  const progress = {
+    get(cardId) {
+      return read(STORAGE_KEYS.progress)[cardId] || null;
+    },
+    set(cardId, { season, episode, hash }) {
+      const all = read(STORAGE_KEYS.progress);
+      all[cardId] = { season, episode, hash, updated: now() };
+      storage.set(STORAGE_KEYS.progress, all);
+    },
+  };
+
+  const seen = {
+    get(tvId) {
+      const v = read(STORAGE_KEYS.seen)[tvId];
+      return typeof v === 'number' ? v : null;
+    },
+    set(tvId, aired) {
+      const all = read(STORAGE_KEYS.seen);
+      all[tvId] = aired;
+      storage.set(STORAGE_KEYS.seen, all);
+    },
+  };
+
+  const tvcache = {
+    get(tvId) {
+      const e = read(STORAGE_KEYS.tvcache)[tvId];
+      if (!e || now() - e.checked > LIMITS.tvCacheMs) return null;
+      return e;
+    },
+    set(tvId, status) {
+      const all = read(STORAGE_KEYS.tvcache);
+      all[tvId] = { status, checked: now() };
+      storage.set(STORAGE_KEYS.tvcache, all);
+    },
+  };
+
+  const notify = {
+    due() {
+      const at = storage.get(STORAGE_KEYS.notifyAt, 0);
+      return now() - (typeof at === 'number' ? at : 0) >= LIMITS.notifyEveryMs;
+    },
+    mark() {
+      storage.set(STORAGE_KEYS.notifyAt, now());
+    },
+  };
+
+  const filters = {
+    get(kind) {
+      return { ...DEFAULT_FILTER, ...(read(STORAGE_KEYS.filters)[kind] || {}) };
+    },
+    set(kind, f) {
+      const all = read(STORAGE_KEYS.filters);
+      all[kind] = { genre: f.genre ?? null, year: f.year ?? null, sort: f.sort ?? 'new' };
+      storage.set(STORAGE_KEYS.filters, all);
+    },
+  };
+
+  const preload = {
+    get(cardId) {
+      return read(STORAGE_KEYS.preload)[cardId] || null;
+    },
+    set(cardId, data) {
+      const all = read(STORAGE_KEYS.preload);
+      all[cardId] = data;
+      storage.set(STORAGE_KEYS.preload, all);
+    },
+    remove(cardId) {
+      const all = read(STORAGE_KEYS.preload);
+      if (!(cardId in all)) return;
+      delete all[cardId];
+      storage.set(STORAGE_KEYS.preload, all);
+    },
+    all() {
+      const all = read(STORAGE_KEYS.preload);
+      return Object.keys(all)
+        .map((cardId) => ({ cardId, ...all[cardId] }))
+        .sort((a, b) => (b.added || 0) - (a.added || 0));
+    },
+  };
+
+  function trim(key, field) {
+    const all = read(key);
+    const ids = Object.keys(all);
+    if (ids.length <= MAX_ENTRIES) return;
+    ids.sort((a, b) => (all[b][field] || 0) - (all[a][field] || 0));
+    const kept = {};
+    for (const id of ids.slice(0, MAX_ENTRIES)) kept[id] = all[id];
+    storage.set(key, kept);
+  }
+
+  function prune() {
+    trim(STORAGE_KEYS.progress, 'updated');
+    trim(STORAGE_KEYS.tvcache, 'checked');
+  }
+
+  return { progress, seen, tvcache, notify, filters, preload, prune };
+}
