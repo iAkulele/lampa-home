@@ -753,6 +753,7 @@
   var VIDEO = ["asf", "wmv", "divx", "avi", "mp4", "m4v", "mov", "3gp", "3g2", "mkv", "trp", "tp", "mts", "mpg", "mpeg", "dat", "vob", "rm", "rmvb", "m2ts", "ts"];
   var INDIVIDUAL = ["vob", "m2ts"];
   var FILES_EVERY_MS = 2e3;
+  var WATCHED_PERCENT = 85;
   var FILES_TRIES = 45;
   var HASH_TIMEOUT_MS = 2e4;
   var MSG = {
@@ -791,6 +792,18 @@
     const byAbs = bare.find(({ ep }) => ctx.absolute != null && ep.absolute === ctx.absolute) || bare.find(({ ep }) => ep.absolute === ctx.episode);
     if (byAbs) return byAbs.f;
     return videos.length === 1 && parsed[0].ep.episode == null ? videos[0] : null;
+  }
+  function advanceWatched(target, seasons, isWatched) {
+    let t = { season: target.season, episode: target.episode };
+    for (let guard2 = 0; guard2 < 5e3 && isWatched(t.season, t.episode); guard2++) {
+      const next = nextEpisode(t, seasons);
+      if (next.season === t.season && next.episode === t.episode) break;
+      t = next;
+    }
+    return t;
+  }
+  function timelineHashString(season, episode, originalTitle) {
+    return [season, season > 10 ? ":" : "", episode, originalTitle].join("");
   }
   function buildSearchParams(card, ctx, parseLang) {
     const title = card.title || card.name || "";
@@ -926,6 +939,16 @@
     L.Activity.push({ url: "", title: L.Lang.translate("title_torrents"), component: "torrents", ...params });
   }
   var current = null;
+  var playingId = null;
+  function isWatchedIn(movie) {
+    const L = lampa();
+    const title = movie.original_title || movie.original_name || "";
+    return (season, episode) => {
+      const hash = L.Utils.hash(timelineHashString(season, episode, title));
+      const view = L.Timeline.view(hash, L.Timeline.link(movie, season, episode));
+      return !!view && view.percent >= WATCHED_PERCENT;
+    };
+  }
   async function run(card) {
     const L = lampa();
     if (!card || current) return;
@@ -950,10 +973,11 @@
       if (kind !== "movie") {
         const seasons = details && details.seasons || card.seasons || [];
         const progress = store.progress.get(card.id);
-        let target = nextEpisode(progress, seasons);
+        let target = advanceWatched(nextEpisode(progress, seasons), seasons, isWatchedIn(movie));
         const status = details ? episodeStatus(details, todayIso()) : null;
-        if (progress && status && (target.season > status.season || target.season === status.season && target.episode > status.aired)) {
-          target = { season: progress.season, episode: progress.episode };
+        if (status && (target.season > status.season || target.season === status.season && target.episode > status.aired)) {
+          if (status.aired >= 1) target = { season: status.season, episode: status.aired };
+          else if (progress) target = { season: progress.season, episode: progress.episode };
         }
         ctx = { kind, season: target.season, episode: target.episode, absolute: absoluteEpisode(seasons, target.season, target.episode) };
       }
@@ -986,6 +1010,7 @@
       }
       finish();
       if (movie.id) L.Favorite.add("history", movie, 100);
+      playingId = kind === "movie" ? null : card.id;
       const start2 = { ...element, playlist };
       L.Player.play(start2);
       L.Player.playlist(playlist);
@@ -1013,10 +1038,17 @@
     btn.on("hover:enter", () => run(card));
     row.first().prepend(btn);
   }
+  function onPlayerStart(data) {
+    if (!playingId || !data || !data.card || data.card.id !== playingId) return;
+    if (!data.torrent_hash || !(data.season > 0) || !(data.episode > 0)) return;
+    store.progress.set(playingId, { season: data.season, episode: data.episode, hash: data.torrent_hash });
+  }
   function init() {
-    lampa().Listener.follow("full", (e) => {
+    const L = lampa();
+    L.Listener.follow("full", (e) => {
       if (e.type == "complite") addButton(e);
     });
+    if (L.Player.listener) L.Player.listener.follow("start", onPlayerStart);
   }
 
   // src/catalog.js

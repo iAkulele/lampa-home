@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { detectKind, pickFile, buildSearchParams } from '../src/play.js';
+import { detectKind, pickFile, buildSearchParams, advanceWatched, timelineHashString } from '../src/play.js';
 
 const GiB = 1024 ** 3;
 
@@ -75,4 +75,25 @@ test('test_build_search_params', () => {
   assert.strictEqual(t.search_one, 'Пацаны S03');
   assert.strictEqual(t.search_two, 'The Boys S03');
   assert.strictEqual(buildSearchParams(tv, { kind: 'tv', season: 12, episode: 1 }, 'df').search, 'The Boys S12');
+});
+
+const SEASONS = [{ season_number: 0, episode_count: 3 }, { season_number: 1, episode_count: 8 }, { season_number: 2, episode_count: 6 }];
+
+test('test_advance_watched_skips_watched_episodes', () => {
+  const watched = new Set(['1:2', '1:3']);
+  const isWatched = (s, e) => watched.has(s + ':' + e);
+  assert.deepStrictEqual(advanceWatched({ season: 1, episode: 2 }, SEASONS, isWatched), { season: 1, episode: 4 });
+  assert.deepStrictEqual(advanceWatched({ season: 1, episode: 5 }, SEASONS, isWatched), { season: 1, episode: 5 });
+});
+
+test('test_advance_watched_rolls_season', () => {
+  const isWatched = (s, e) => s === 1 && e === 8;
+  assert.deepStrictEqual(advanceWatched({ season: 1, episode: 8 }, SEASONS, isWatched), { season: 2, episode: 1 });
+  // Everything watched: stops at the last known episode.
+  assert.deepStrictEqual(advanceWatched({ season: 1, episode: 7 }, SEASONS, () => true), { season: 2, episode: 6 });
+});
+
+test('test_timeline_hash_string_matches_lampa', () => {
+  assert.strictEqual(timelineHashString(1, 4, 'The Boys'), '14The Boys');
+  assert.strictEqual(timelineHashString(12, 3, 'One Piece'), '12:3One Piece');
 });

@@ -11,6 +11,7 @@ const ANIMATION = 16;
 const VIDEO = ['asf', 'wmv', 'divx', 'avi', 'mp4', 'm4v', 'mov', '3gp', '3g2', 'mkv', 'trp', 'tp', 'mts', 'mpg', 'mpeg', 'dat', 'vob', 'rm', 'rmvb', 'm2ts', 'ts'];
 const INDIVIDUAL = ['vob', 'm2ts'];
 const FILES_EVERY_MS = 2000;
+const WATCHED_PERCENT = 85;
 const FILES_TRIES = 45;
 const HASH_TIMEOUT_MS = 20000;
 
@@ -59,6 +60,22 @@ export function pickFile(files, ctx) {
   if (byAbs) return byAbs.f;
   // A single-episode release: selectTorrent already matched the episode by title.
   return videos.length === 1 && parsed[0].ep.episode == null ? videos[0] : null;
+}
+
+// Moves past episodes already watched (by Lampa's timeline); stops at the last known episode.
+export function advanceWatched(target, seasons, isWatched) {
+  let t = { season: target.season, episode: target.episode };
+  for (let guard = 0; guard < 5000 && isWatched(t.season, t.episode); guard++) {
+    const next = nextEpisode(t, seasons);
+    if (next.season === t.season && next.episode === t.episode) break;
+    t = next;
+  }
+  return t;
+}
+
+// Same string Lampa hashes for a serial's torrent file (utils/episodes_parser.js, by_title).
+export function timelineHashString(season, episode, originalTitle) {
+  return [season, season > 10 ? ':' : '', episode, originalTitle].join('');
 }
 
 // Mirrors Lampa's components/full/start/torrents.js.
@@ -213,6 +230,18 @@ function openNativeList(params) {
 }
 
 let current = null;
+// Card whose episodes the inner player may record into lh_progress.
+let playingId = null;
+
+function isWatchedIn(movie) {
+  const L = lampa();
+  const title = movie.original_title || movie.original_name || '';
+  return (season, episode) => {
+    const hash = L.Utils.hash(timelineHashString(season, episode, title));
+    const view = L.Timeline.view(hash, L.Timeline.link(movie, season, episode));
+    return !!view && view.percent >= WATCHED_PERCENT;
+  };
+}
 
 export async function run(card) {
   const L = lampa();
@@ -240,11 +269,14 @@ export async function run(card) {
     if (kind !== 'movie') {
       const seasons = (details && details.seasons) || card.seasons || [];
       const progress = store.progress.get(card.id);
-      let target = nextEpisode(progress, seasons);
+      // Lampa's own marks win: skip episodes its timeline already has as watched
+      // (an external player auto-advancing E1 -> E2 -> E3 reports them there).
+      let target = advanceWatched(nextEpisode(progress, seasons), seasons, isWatchedIn(movie));
       // TMDB counts announced episodes too: never go past the last aired one.
       const status = details ? episodeStatus(details, todayIso()) : null;
-      if (progress && status && (target.season > status.season || (target.season === status.season && target.episode > status.aired))) {
-        target = { season: progress.season, episode: progress.episode };
+      if (status && (target.season > status.season || (target.season === status.season && target.episode > status.aired))) {
+        if (status.aired >= 1) target = { season: status.season, episode: status.aired };
+        else if (progress) target = { season: progress.season, episode: progress.episode };
       }
       ctx = { kind, season: target.season, episode: target.episode, absolute: absoluteEpisode(seasons, target.season, target.episode) };
     }
@@ -281,6 +313,7 @@ export async function run(card) {
 
     finish();
     if (movie.id) L.Favorite.add('history', movie, 100);
+    playingId = kind === 'movie' ? null : card.id;
     const start = { ...element, playlist };
     L.Player.play(start);
     L.Player.playlist(playlist);
@@ -310,8 +343,18 @@ function addButton(e) {
   row.first().prepend(btn);
 }
 
+// Inner player: every started playlist element (incl. switching to the next episode)
+// of the series we launched is recorded as progress.
+function onPlayerStart(data) {
+  if (!playingId || !data || !data.card || data.card.id !== playingId) return;
+  if (!data.torrent_hash || !(data.season > 0) || !(data.episode > 0)) return;
+  store.progress.set(playingId, { season: data.season, episode: data.episode, hash: data.torrent_hash });
+}
+
 export function init() {
-  lampa().Listener.follow('full', (e) => {
+  const L = lampa();
+  L.Listener.follow('full', (e) => {
     if (e.type == 'complite') addButton(e);
   });
+  if (L.Player.listener) L.Player.listener.follow('start', onPlayerStart);
 }
