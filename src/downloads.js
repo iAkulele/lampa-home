@@ -47,6 +47,8 @@ const MSG = {
   forget: 'Убрать из списка',
   forgotten: 'Убрано из списка',
   offline: 'TorrServer недоступен, показан локальный список',
+  notStarted: 'Не начата',
+  start: 'Начать закачку',
 };
 
 // Card fields the «Скачанное» screen and the player need; the rest of a full card
@@ -68,6 +70,17 @@ export function preloadProgress({ loaded_size, file_stats, index }) {
   return { percent: done ? 100 : Math.min(99, Math.floor((loaded / size) * 100)), done };
 }
 
+// TorrServer's `get` answer -> {percent, done, notStarted, id}. id: the file the badge
+// follows (the saved index, else the largest file). notStarted: no saved index and
+// nothing loaded, i.e. marked but the preload was never kicked off.
+export function preloadState({ index, loaded_size, file_stats }) {
+  const stats = file_stats || [];
+  const largest = stats.reduce((b, f) => ((f.length || 0) > ((b && b.length) || 0) ? f : b), null);
+  const id = index != null ? index : largest && largest.id;
+  const notStarted = index == null && !(loaded_size > 0);
+  return { ...preloadProgress({ loaded_size, file_stats: stats, index: id }), notStarted, id };
+}
+
 export function cardSnapshot(card) {
   const out = {};
   for (const key of SNAPSHOT_FIELDS) {
@@ -87,6 +100,7 @@ export function replacePlan(existing, newHash) {
 export function badgeLabel(progress) {
   if (!progress) return '';
   if (progress.missing) return MSG.missing;
+  if (progress.notStarted) return MSG.notStarted;
   return progress.done ? 'Скачано' : `Качается ${progress.percent} %`;
 }
 
@@ -261,17 +275,28 @@ const cacheEntry = (e) => ({
   absolute: e.absolute, size: e.size, added: e.added, card: e.card,
 });
 
-// Keeps the local list equal to TorrServer's (oldest first: the newest of a card wins).
-function syncCache(entries) {
+// The new local copy for TorrServer's list, or null to keep the old one: an empty
+// server list never wipes a non-empty copy (a TorrServer reset or a wrong address
+// would otherwise lose every device's list). The newest download of a card wins.
+export function cacheUpdate(entries, cachedCount) {
+  if (!Array.isArray(entries)) return null;
+  if (!entries.length && cachedCount > 0) return null;
   const map = {};
-  for (const e of [...entries].reverse()) map[e.key] = cacheEntry(e);
-  store.preload.replace(map);
+  for (const e of [...entries].sort((a, b) => (a.added || 0) - (b.added || 0))) map[e.key] = cacheEntry(e);
+  return map;
+}
+
+function syncCache(entries) {
+  const map = cacheUpdate(entries, store.preload.all().length);
+  if (map) store.preload.replace(map);
 }
 
 // Downloads from TorrServer's own list, the same on every device. Throws a DlError
 // when TorrServer is not set up or unreachable.
 export async function listDownloads() {
   const list = await tsTorrents({ action: 'list' }, LIST_TIMEOUT_MS);
+  // {error: ...} or anything else that is not a list: treated as unreachable.
+  if (!Array.isArray(list)) throw fail(MSG.torrserver);
   const entries = parseDownloadEntries(list);
   const legacy = legacyEntries(list, cachedDownloads());
   for (const e of legacy) {
@@ -344,8 +369,10 @@ export async function preload(card) {
       poster: movie.poster_path ? L.Api.img(movie.poster_path) : '',
       category: ctx.kind === 'movie' ? 'movie' : 'tv',
     };
+    // Added unmarked: a torrent left behind by a crash before the kick is not a download.
     const added = await tsTorrents({
-      action: 'add', link: chosen.MagnetUri || chosen.Link, ...fields, data: preloadData(snapshot, meta), save_to_db: true,
+      action: 'add', link: chosen.MagnetUri || chosen.Link, ...fields,
+      data: JSON.stringify({ lampa: true, movie: snapshot }), save_to_db: true,
     });
     const hash = added && added.hash;
     if (!hash) throw fail(MSG.torrserver);
@@ -375,11 +402,11 @@ export async function preload(card) {
 
     job.kicked = true;
     firePreload(hash, file.id);
-    // `add` never changes the data of a torrent TorrServer already has (a release
-    // played before, or the same one again), `set` does; without it the file is
-    // picked again at play time.
+    // Marked only now, with the file index: from here on every device lists it.
+    // (`add` never changes the data of a torrent TorrServer already has; `set` does.)
+    // If `set` fails, the local copy below is marked on the server by the next list.
     meta.index = file.id;
-    tsTorrents({ action: 'set', hash, ...fields, data: preloadData(snapshot, meta) }).catch(() => {});
+    await tsTorrents({ action: 'set', hash, ...fields, data: preloadData(snapshot, meta) }).catch(() => {});
     store.preload.set(key, cacheEntry({ ...meta, hash, title: chosen.Title, size: file.length, card: snapshot }));
     finish();
     L.Noty.show(replaced ? `${MSG.replaced}. ${MSG.started}` : MSG.started);
@@ -403,11 +430,37 @@ export async function status(hash, index) {
     throw err;
   }
   const stats = (json && json.file_stats) || [];
-  // No saved file index: the largest file stands for the release.
-  const id = index != null ? index : (stats.reduce((b, f) => ((f.length || 0) > ((b && b.length) || 0) ? f : b), null) || {}).id;
-  const p = preloadProgress({ loaded_size: json && json.loaded_size, file_stats: stats, index: id });
-  const file = stats.find((f) => f.id === id);
+  const p = preloadState({ index, loaded_size: json && json.loaded_size, file_stats: stats });
+  const file = stats.find((f) => f.id === p.id);
   return { loaded: (json && json.loaded_size) || 0, size: (file && file.length) || 0, ...p };
+}
+
+// «Начать закачку» for a download that was marked but never kicked off: picks the
+// file, starts the preload and saves the index. true on success.
+export async function startPreload(entry) {
+  const L = lampa();
+  L.Loading.start(() => L.Loading.stop(), MSG.files);
+  try {
+    const json = await tsTorrents({ action: 'get', hash: entry.hash });
+    const files = (json && json.file_stats) || [];
+    if (!files.length) throw fail(MSG.noFiles);
+    const ctx = { kind: entry.kind, season: entry.season, episode: entry.episode, absolute: entry.absolute };
+    const file = pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(entry.title || '') }, fileInfos(files, entry.card));
+    if (!file) throw fail(MSG.noFile);
+    firePreload(entry.hash, file.id);
+    const meta = { ...ctx, index: file.id, added: entry.added || Date.now(), by: deviceName() };
+    const fields = { title: json.title || '', poster: json.poster || '', category: json.category || '' };
+    await tsTorrents({ action: 'set', hash: entry.hash, ...fields, data: preloadData(entry.card, meta) }).catch(() => {});
+    store.preload.set(entry.key, cacheEntry({ ...entry, ...meta, size: file.length }));
+    L.Loading.stop();
+    L.Noty.show(MSG.started);
+    return true;
+  } catch (err) {
+    L.Loading.stop();
+    if (!(err instanceof DlError)) console.error('lampa-home preload', err);
+    L.Noty.show(err instanceof DlError ? err.message : MSG.torrserver);
+    return false;
+  }
 }
 
 // Deletes the release and its cache folder through the PC helper; true on success.
@@ -433,9 +486,14 @@ export async function remove(entry) {
 
 // Takes the entry off the list on every device: the torrent leaves TorrServer
 // (rem), its files stay on the PC.
+// Never rejects: a 404 or a TorrServer that is down still drops the local entry.
 export async function forget(entry) {
   if (!entry) return;
-  if (entry.hash) await tsRem(entry.hash);
+  try {
+    if (entry.hash) await tsTorrents({ action: 'rem', hash: entry.hash });
+  } catch (e) {
+    // already gone on the server, or the server is down: the local entry goes anyway
+  }
   store.preload.remove(entry.key);
   lampa().Noty.show(MSG.forgotten);
 }
@@ -448,7 +506,7 @@ function component(object) {
   const L = lampa();
   object.params = { ...(object.params || {}), items: { mapping: 'grid', cols: COLS } };
   const comp = L.Maker.make('Category', object, (m) => m.MASK.base);
-  const badges = new Map(); // hash -> {el, entry, missing}
+  const badges = new Map(); // hash -> {el, entry, missing, notStarted}
   let timer = null;
   let pending = 0; // status requests of the previous tick still in flight
 
@@ -465,7 +523,10 @@ function component(object) {
       pollQueue(() => status(entry.hash, entry.index))
         .then((p) => {
           const state = badges.get(entry.hash);
-          if (state) state.missing = !!p.missing;
+          if (state) {
+            state.missing = !!p.missing;
+            state.notStarted = !!p.notStarted;
+          }
           el.textContent = badgeLabel(p);
           el.classList.toggle('lh-dl-badge--done', p.done);
         })
@@ -499,6 +560,13 @@ function component(object) {
   function offerForget(entry) {
     ask(MSG.helper, [{ title: MSG.forget, forget: true }], (a) => {
       if (a.forget) forget(entry).then(reload);
+    });
+  }
+
+  function offerStart(entry) {
+    ask(MSG.notStarted, [{ title: MSG.start, start: true }, { title: MSG.forget, forget: true }], (a) => {
+      if (a.start) startPreload(entry).then((ok) => ok && reload());
+      else if (a.forget) forget(entry).then(reload);
     });
   }
 
@@ -565,6 +633,7 @@ function component(object) {
         onEnter: guarded(comp, () => {
           const state = badges.get(entry.hash);
           if (state && state.missing) return confirmRemove(entry);
+          if (state && state.notStarted) return offerStart(entry);
           const { card, hash, index, kind, season, episode, absolute, title } = entry;
           startFromHash(hash, card, { kind, season, episode, absolute, index }, title);
         }),

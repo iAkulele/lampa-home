@@ -1767,7 +1767,9 @@
     missing: "\u0423\u0434\u0430\u043B\u0435\u043D\u043E \u043D\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0435",
     forget: "\u0423\u0431\u0440\u0430\u0442\u044C \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430",
     forgotten: "\u0423\u0431\u0440\u0430\u043D\u043E \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430",
-    offline: "TorrServer \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D, \u043F\u043E\u043A\u0430\u0437\u0430\u043D \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u0441\u043F\u0438\u0441\u043E\u043A"
+    offline: "TorrServer \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D, \u043F\u043E\u043A\u0430\u0437\u0430\u043D \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u0441\u043F\u0438\u0441\u043E\u043A",
+    notStarted: "\u041D\u0435 \u043D\u0430\u0447\u0430\u0442\u0430",
+    start: "\u041D\u0430\u0447\u0430\u0442\u044C \u0437\u0430\u043A\u0430\u0447\u043A\u0443"
   };
   var SNAPSHOT_FIELDS = [
     "id",
@@ -1793,6 +1795,13 @@
     const done = loaded >= size;
     return { percent: done ? 100 : Math.min(99, Math.floor(loaded / size * 100)), done };
   }
+  function preloadState({ index, loaded_size, file_stats }) {
+    const stats = file_stats || [];
+    const largest = stats.reduce((b, f) => (f.length || 0) > (b && b.length || 0) ? f : b, null);
+    const id = index != null ? index : largest && largest.id;
+    const notStarted = index == null && !(loaded_size > 0);
+    return { ...preloadProgress({ loaded_size, file_stats: stats, index: id }), notStarted, id };
+  }
   function cardSnapshot(card) {
     const out = {};
     for (const key of SNAPSHOT_FIELDS) {
@@ -1808,6 +1817,7 @@
   function badgeLabel(progress) {
     if (!progress) return "";
     if (progress.missing) return MSG2.missing;
+    if (progress.notStarted) return MSG2.notStarted;
     return progress.done ? "\u0421\u043A\u0430\u0447\u0430\u043D\u043E" : `\u041A\u0430\u0447\u0430\u0435\u0442\u0441\u044F ${progress.percent} %`;
   }
   var entryKey = (card) => (card.original_name || card.name ? "tv" : "movie") + ":" + card.id;
@@ -1949,13 +1959,20 @@
     added: e.added,
     card: e.card
   });
-  function syncCache(entries) {
+  function cacheUpdate(entries, cachedCount) {
+    if (!Array.isArray(entries)) return null;
+    if (!entries.length && cachedCount > 0) return null;
     const map = {};
-    for (const e of [...entries].reverse()) map[e.key] = cacheEntry(e);
-    store.preload.replace(map);
+    for (const e of [...entries].sort((a, b) => (a.added || 0) - (b.added || 0))) map[e.key] = cacheEntry(e);
+    return map;
+  }
+  function syncCache(entries) {
+    const map = cacheUpdate(entries, store.preload.all().length);
+    if (map) store.preload.replace(map);
   }
   async function listDownloads() {
     const list = await tsTorrents({ action: "list" }, LIST_TIMEOUT_MS);
+    if (!Array.isArray(list)) throw fail2(MSG2.torrserver);
     const entries = parseDownloadEntries(list);
     const legacy = legacyEntries(list, cachedDownloads());
     for (const e of legacy) {
@@ -2032,7 +2049,7 @@
         action: "add",
         link: chosen.MagnetUri || chosen.Link,
         ...fields,
-        data: preloadData(snapshot, meta),
+        data: JSON.stringify({ lampa: true, movie: snapshot }),
         save_to_db: true
       });
       const hash = added && added.hash;
@@ -2061,7 +2078,7 @@
       job.kicked = true;
       firePreload(hash, file.id);
       meta.index = file.id;
-      tsTorrents({ action: "set", hash, ...fields, data: preloadData(snapshot, meta) }).catch(() => {
+      await tsTorrents({ action: "set", hash, ...fields, data: preloadData(snapshot, meta) }).catch(() => {
       });
       store.preload.set(key, cacheEntry({ ...meta, hash, title: chosen.Title, size: file.length, card: snapshot }));
       finish();
@@ -2083,10 +2100,35 @@
       throw err;
     }
     const stats = json && json.file_stats || [];
-    const id = index != null ? index : (stats.reduce((b, f) => (f.length || 0) > (b && b.length || 0) ? f : b, null) || {}).id;
-    const p = preloadProgress({ loaded_size: json && json.loaded_size, file_stats: stats, index: id });
-    const file = stats.find((f) => f.id === id);
+    const p = preloadState({ index, loaded_size: json && json.loaded_size, file_stats: stats });
+    const file = stats.find((f) => f.id === p.id);
     return { loaded: json && json.loaded_size || 0, size: file && file.length || 0, ...p };
+  }
+  async function startPreload(entry) {
+    const L = lampa();
+    L.Loading.start(() => L.Loading.stop(), MSG2.files);
+    try {
+      const json = await tsTorrents({ action: "get", hash: entry.hash });
+      const files = json && json.file_stats || [];
+      if (!files.length) throw fail2(MSG2.noFiles);
+      const ctx = { kind: entry.kind, season: entry.season, episode: entry.episode, absolute: entry.absolute };
+      const file = pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(entry.title || "") }, fileInfos(files, entry.card));
+      if (!file) throw fail2(MSG2.noFile);
+      firePreload(entry.hash, file.id);
+      const meta = { ...ctx, index: file.id, added: entry.added || Date.now(), by: deviceName() };
+      const fields = { title: json.title || "", poster: json.poster || "", category: json.category || "" };
+      await tsTorrents({ action: "set", hash: entry.hash, ...fields, data: preloadData(entry.card, meta) }).catch(() => {
+      });
+      store.preload.set(entry.key, cacheEntry({ ...entry, ...meta, size: file.length }));
+      L.Loading.stop();
+      L.Noty.show(MSG2.started);
+      return true;
+    } catch (err) {
+      L.Loading.stop();
+      if (!(err instanceof DlError)) console.error("lampa-home preload", err);
+      L.Noty.show(err instanceof DlError ? err.message : MSG2.torrserver);
+      return false;
+    }
   }
   async function remove(entry) {
     const L = lampa();
@@ -2106,7 +2148,10 @@
   }
   async function forget(entry) {
     if (!entry) return;
-    if (entry.hash) await tsRem(entry.hash);
+    try {
+      if (entry.hash) await tsTorrents({ action: "rem", hash: entry.hash });
+    } catch (e) {
+    }
     store.preload.remove(entry.key);
     lampa().Noty.show(MSG2.forgotten);
   }
@@ -2128,7 +2173,10 @@
         pending++;
         pollQueue(() => status(entry.hash, entry.index)).then((p) => {
           const state = badges.get(entry.hash);
-          if (state) state.missing = !!p.missing;
+          if (state) {
+            state.missing = !!p.missing;
+            state.notStarted = !!p.notStarted;
+          }
           el.textContent = badgeLabel(p);
           el.classList.toggle("lh-dl-badge--done", p.done);
         }).catch(() => {
@@ -2156,6 +2204,12 @@
     function offerForget(entry) {
       ask(MSG2.helper, [{ title: MSG2.forget, forget: true }], (a) => {
         if (a.forget) forget(entry).then(reload);
+      });
+    }
+    function offerStart(entry) {
+      ask(MSG2.notStarted, [{ title: MSG2.start, start: true }, { title: MSG2.forget, forget: true }], (a) => {
+        if (a.start) startPreload(entry).then((ok) => ok && reload());
+        else if (a.forget) forget(entry).then(reload);
       });
     }
     function confirmRemove(entry) {
@@ -2215,6 +2269,7 @@
           onEnter: guarded(comp, () => {
             const state = badges.get(entry.hash);
             if (state && state.missing) return confirmRemove(entry);
+            if (state && state.notStarted) return offerStart(entry);
             const { card, hash, index, kind, season, episode, absolute, title } = entry;
             startFromHash(hash, card, { kind, season, episode, absolute, index }, title);
           }),

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { preloadProgress, cardSnapshot, badgeLabel, replacePlan, parseDownloadEntries, findExisting, legacyEntries } from '../src/downloads.js';
+import { preloadProgress, cardSnapshot, badgeLabel, replacePlan, parseDownloadEntries, findExisting, legacyEntries, preloadState, cacheUpdate } from '../src/downloads.js';
 
 const MiB = 1024 ** 2;
 const files = [
@@ -139,4 +139,33 @@ test('test_legacy_entries_only_unmarked_on_server', () => {
   assert.deepStrictEqual(out.map((e) => e.hash), [h('a')]);
   assert.strictEqual(out[0].server.hash, h('a'));
   assert.deepStrictEqual(legacyEntries(null, cached), []);
+});
+
+test('test_preload_state_not_started', () => {
+  // Marked but never kicked (no index, nothing loaded): «Не начата».
+  const s = preloadState({ index: undefined, loaded_size: 0, file_stats: files });
+  assert.strictEqual(s.notStarted, true);
+  assert.strictEqual(badgeLabel(s), 'Не начата');
+  // No index but something loaded: the largest file stands for the release.
+  const p = preloadState({ index: undefined, loaded_size: 500 * MiB, file_stats: files });
+  assert.deepStrictEqual(p, { percent: 50, done: false, notStarted: false, id: 2 });
+  // With an index, 0 bytes is just the start of a download.
+  const q = preloadState({ index: 1, loaded_size: 0, file_stats: files });
+  assert.strictEqual(q.notStarted, false);
+  assert.strictEqual(q.id, 1);
+  assert.strictEqual(badgeLabel(q), 'Качается 0 %');
+  // loaded_size missing in the answer counts as 0.
+  assert.strictEqual(preloadState({ file_stats: files }).notStarted, true);
+});
+
+test('test_cache_update_keeps_cache_on_empty_or_bad_list', () => {
+  const e1 = { key: 'movie:42', hash: 'a', added: 1, card: film };
+  const e2 = { key: 'movie:42', hash: 'b', added: 2, card: film };
+  // Newest of a card wins.
+  assert.strictEqual(cacheUpdate([e2, e1], 0)['movie:42'].hash, 'b');
+  // An empty server list does not wipe a non-empty local copy...
+  assert.strictEqual(cacheUpdate([], 3), null);
+  // ...but an empty one stays empty.
+  assert.deepStrictEqual(cacheUpdate([], 0), {});
+  assert.strictEqual(cacheUpdate(null, 0), null);
 });
