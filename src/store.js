@@ -82,6 +82,10 @@ export function createStore(storage, now = () => Date.now()) {
       delete all[cardId];
       storage.set(STORAGE_KEYS.preload, all);
     },
+    // Overwrites the whole list (the local copy of TorrServer's list).
+    replace(map) {
+      storage.set(STORAGE_KEYS.preload, map && typeof map === 'object' ? map : {});
+    },
     all() {
       const all = read(STORAGE_KEYS.preload);
       return Object.keys(all)

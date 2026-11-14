@@ -339,6 +339,10 @@
         delete all[cardId];
         storage2.set(STORAGE_KEYS.preload, all);
       },
+      // Overwrites the whole list (the local copy of TorrServer's list).
+      replace(map) {
+        storage2.set(STORAGE_KEYS.preload, map && typeof map === "object" ? map : {});
+      },
       all() {
         const all = read(STORAGE_KEYS.preload);
         return Object.keys(all).map((cardId) => ({ cardId, ...all[cardId] })).sort((a, b) => (b.added || 0) - (a.added || 0));
@@ -1724,6 +1728,7 @@
   var FILES_TRIES2 = 30;
   var PRELOAD_ABORT_MS = 3e3;
   var HELPER_TIMEOUT_MS = 1e4;
+  var LIST_TIMEOUT_MS = 8e3;
   var MSG2 = {
     search: "\u0418\u0449\u0443 \u0440\u0430\u0437\u0434\u0430\u0447\u0443\u2026",
     server: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u0432 TorrServer\u2026",
@@ -1743,7 +1748,8 @@
     confirm: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441 \u0434\u0438\u0441\u043A\u0430?",
     missing: "\u0423\u0434\u0430\u043B\u0435\u043D\u043E \u043D\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0435",
     forget: "\u0423\u0431\u0440\u0430\u0442\u044C \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430",
-    forgotten: "\u0423\u0431\u0440\u0430\u043D\u043E \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430"
+    forgotten: "\u0423\u0431\u0440\u0430\u043D\u043E \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430",
+    offline: "TorrServer \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D, \u043F\u043E\u043A\u0430\u0437\u0430\u043D \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u0441\u043F\u0438\u0441\u043E\u043A"
   };
   var SNAPSHOT_FIELDS = [
     "id",
@@ -1787,6 +1793,52 @@
     return progress.done ? "\u0421\u043A\u0430\u0447\u0430\u043D\u043E" : `\u041A\u0430\u0447\u0430\u0435\u0442\u0441\u044F ${progress.percent} %`;
   }
   var entryKey = (card) => (card.original_name || card.name ? "tv" : "movie") + ":" + card.id;
+  function preloadData(snapshot, meta) {
+    return JSON.stringify({ lampa: true, movie: snapshot, lh_preload: meta });
+  }
+  var parseData = (data) => {
+    if (data && typeof data === "object") return data;
+    try {
+      return JSON.parse(data);
+    } catch (e) {
+      return null;
+    }
+  };
+  function parseDownloadEntries(list) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const t of list) {
+      if (!t || !t.hash) continue;
+      const data = parseData(t.data);
+      const meta = data && data.lh_preload;
+      const card = data && data.movie;
+      if (!meta || typeof meta !== "object" || !card || typeof card !== "object" || card.id == null) continue;
+      out.push({
+        key: entryKey(card),
+        hash: t.hash,
+        card,
+        index: typeof meta.index === "number" ? meta.index : void 0,
+        season: meta.season,
+        episode: meta.episode,
+        absolute: meta.absolute,
+        kind: meta.kind,
+        added: Number(meta.added) || (Number(t.timestamp) || 0) * 1e3,
+        size: t.torrent_size,
+        title: String(t.title || "").replace(/^\[LAMPA\]\s*/, "")
+      });
+    }
+    return out.sort((a, b) => b.added - a.added);
+  }
+  function legacyEntries(list, cached) {
+    if (!Array.isArray(list) || !Array.isArray(cached)) return [];
+    const marked = new Set(parseDownloadEntries(list).map((e) => e.hash));
+    const onServer = new Map(list.filter((t) => t && t.hash).map((t) => [t.hash, t]));
+    return cached.filter((e) => e && e.hash && e.card && e.key && onServer.has(e.hash) && !marked.has(e.hash)).map((e) => ({ ...e, server: onServer.get(e.hash) }));
+  }
+  function findExisting(entries, key, hash) {
+    const same = (entries || []).filter((e) => e && e.key === key);
+    return same.find((e) => e.hash === hash) || same[0] || null;
+  }
   var DlError = class extends Error {
   };
   var fail2 = (msg) => new DlError(msg);
@@ -1806,12 +1858,17 @@
     }
     return headers;
   }
-  async function tsTorrents(body) {
+  async function tsTorrents(body, timeoutMs) {
+    const url = tsBase() + "/torrents";
+    const ctrl = timeoutMs && typeof AbortController === "function" ? new AbortController() : null;
+    const timer = ctrl && setTimeout(() => ctrl.abort(), timeoutMs);
     let res;
     try {
-      res = await fetch(tsBase() + "/torrents", { method: "POST", headers: tsHeaders(), body: JSON.stringify(body) });
+      res = await fetch(url, { method: "POST", headers: tsHeaders(), body: JSON.stringify(body), signal: ctrl && ctrl.signal });
     } catch (e) {
       throw fail2(MSG2.torrserver);
+    } finally {
+      clearTimeout(timer);
     }
     if (!res.ok) {
       const err = fail2(MSG2.torrserver);
@@ -1856,18 +1913,65 @@
       clearTimeout(timer);
     }
   }
+  var deviceName = () => String(lampa().Storage.get("lh_device", "") || "lampa");
   function helperUrl() {
     const v = lampa().Storage.get("lh_helper_url", HELPER_DEFAULT);
     return String(v || HELPER_DEFAULT).trim().replace(/\/+$/, "");
   }
   var busy = false;
+  var cacheEntry = (e) => ({
+    hash: e.hash,
+    index: e.index,
+    title: e.title,
+    kind: e.kind,
+    season: e.season,
+    episode: e.episode,
+    absolute: e.absolute,
+    size: e.size,
+    added: e.added,
+    card: e.card
+  });
+  function syncCache(entries) {
+    const map = {};
+    for (const e of [...entries].reverse()) map[e.key] = cacheEntry(e);
+    store.preload.replace(map);
+  }
+  async function listDownloads() {
+    const list = await tsTorrents({ action: "list" }, LIST_TIMEOUT_MS);
+    const entries = parseDownloadEntries(list);
+    const legacy = legacyEntries(list, cachedDownloads());
+    for (const e of legacy) {
+      const { server, ...entry } = e;
+      const meta = {
+        index: entry.index,
+        kind: entry.kind,
+        season: entry.season,
+        episode: entry.episode,
+        absolute: entry.absolute,
+        added: entry.added || Date.now(),
+        by: deviceName()
+      };
+      const fields = { title: server.title || "", poster: server.poster || "", category: server.category || "" };
+      tsTorrents({ action: "set", hash: entry.hash, ...fields, data: preloadData(entry.card, meta) }).catch(() => {
+      });
+      entries.push({ ...entry, size: server.torrent_size });
+    }
+    entries.sort((a, b) => (b.added || 0) - (a.added || 0));
+    syncCache(entries);
+    return entries;
+  }
+  function cachedDownloads() {
+    return store.preload.all().filter((e) => e.card && e.hash).map(({ cardId, ...e }) => ({ ...e, key: cardId }));
+  }
   async function preload(card) {
     const L = lampa();
     if (!card || busy || isBusy()) return;
     busy = true;
     const job = { cancelled: false, hash: null, kicked: false };
+    let before = [];
     const dropAdded = () => {
       if (!job.hash || job.kicked) return;
+      if (before.some((e) => e.hash === job.hash)) return;
       if (store.preload.all().some((e) => e.hash === job.hash)) return;
       tsRem(job.hash);
     };
@@ -1889,15 +1993,29 @@
       const { chosen } = selectTorrent(results, ctx);
       if (!chosen) throw fail2(MSG2.none);
       L.Loading.setText(MSG2.server);
+      before = await listDownloads().catch(() => cachedDownloads());
+      if (job.cancelled) return;
       const snapshot = cardSnapshot(movie);
+      const title = String(chosen.Title).replace("??", "?");
+      const meta = {
+        kind: ctx.kind,
+        season: ctx.season,
+        episode: ctx.episode,
+        absolute: ctx.absolute,
+        added: Date.now(),
+        by: deviceName()
+      };
+      const fields = {
+        title: "[LAMPA] " + title,
+        poster: movie.poster_path ? L.Api.img(movie.poster_path) : "",
+        category: ctx.kind === "movie" ? "movie" : "tv"
+      };
       const added = await tsTorrents({
         action: "add",
         link: chosen.MagnetUri || chosen.Link,
-        title: "[LAMPA] " + String(chosen.Title).replace("??", "?"),
-        poster: movie.poster_path ? L.Api.img(movie.poster_path) : "",
-        data: JSON.stringify({ lampa: true, movie: snapshot }),
-        save_to_db: true,
-        category: ctx.kind === "movie" ? "movie" : "tv"
+        ...fields,
+        data: preloadData(snapshot, meta),
+        save_to_db: true
       });
       const hash = added && added.hash;
       if (!hash) throw fail2(MSG2.torrserver);
@@ -1909,7 +2027,7 @@
       const file = pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(chosen.Title) }, fileInfos(files, movie));
       if (!file) throw fail2(MSG2.noFile);
       const key = entryKey(movie);
-      const existing = store.preload.get(key);
+      const existing = findExisting(before, key, hash);
       let replaced = false;
       if (replacePlan(existing, hash) === "replace") {
         L.Loading.setText(MSG2.removing);
@@ -1924,18 +2042,10 @@
       if (job.cancelled) return;
       job.kicked = true;
       firePreload(hash, file.id);
-      store.preload.set(key, {
-        hash,
-        index: file.id,
-        title: chosen.Title,
-        kind: ctx.kind,
-        season: ctx.season,
-        episode: ctx.episode,
-        absolute: ctx.absolute,
-        size: file.length,
-        added: Date.now(),
-        card: snapshot
+      meta.index = file.id;
+      tsTorrents({ action: "set", hash, ...fields, data: preloadData(snapshot, meta) }).catch(() => {
       });
+      store.preload.set(key, cacheEntry({ ...meta, hash, title: chosen.Title, size: file.length, card: snapshot }));
       finish();
       L.Noty.show(replaced ? `${MSG2.replaced}. ${MSG2.started}` : MSG2.started);
     } catch (err) {
@@ -1954,14 +2064,15 @@
       if (err && err.status === 404) return { loaded: 0, size: 0, percent: 0, done: false, missing: true };
       throw err;
     }
-    const p = preloadProgress({ loaded_size: json && json.loaded_size, file_stats: json && json.file_stats, index });
-    const file = (json && json.file_stats || []).find((f) => f.id === index);
+    const stats = json && json.file_stats || [];
+    const id = index != null ? index : (stats.reduce((b, f) => (f.length || 0) > (b && b.length || 0) ? f : b, null) || {}).id;
+    const p = preloadProgress({ loaded_size: json && json.loaded_size, file_stats: stats, index: id });
+    const file = stats.find((f) => f.id === id);
     return { loaded: json && json.loaded_size || 0, size: file && file.length || 0, ...p };
   }
-  async function remove(cardId) {
+  async function remove(entry) {
     const L = lampa();
-    const entry = store.preload.get(cardId);
-    if (!entry) return true;
+    if (!entry || !entry.hash) return true;
     L.Loading.start(() => L.Loading.stop(), MSG2.removing);
     try {
       await helperDelete(entry.hash);
@@ -1971,12 +2082,14 @@
       return false;
     }
     L.Loading.stop();
-    store.preload.remove(cardId);
+    store.preload.remove(entry.key);
     L.Noty.show(MSG2.removed);
     return true;
   }
-  function forget(cardId) {
-    store.preload.remove(cardId);
+  async function forget(entry) {
+    if (!entry) return;
+    if (entry.hash) await tsRem(entry.hash);
+    store.preload.remove(entry.key);
     lampa().Noty.show(MSG2.forgotten);
   }
   var pollQueue = createQueue(2);
@@ -1996,7 +2109,7 @@
       badges.forEach(({ el, entry }) => {
         pending++;
         pollQueue(() => status(entry.hash, entry.index)).then((p) => {
-          const state = badges.get(entry.cardId);
+          const state = badges.get(entry.hash);
           if (state) state.missing = !!p.missing;
           el.textContent = badgeLabel(p);
           el.classList.toggle("lh-dl-badge--done", p.done);
@@ -2022,44 +2135,47 @@
         onBack: () => L.Controller.toggle(enabled)
       });
     }
-    function offerForget(cardId) {
+    function offerForget(entry) {
       ask(MSG2.helper, [{ title: MSG2.forget, forget: true }], (a) => {
-        if (!a.forget) return;
-        forget(cardId);
-        reload();
+        if (a.forget) forget(entry).then(reload);
       });
     }
-    function confirmRemove(cardId) {
-      const state = badges.get(cardId);
+    function confirmRemove(entry) {
+      const state = badges.get(entry.hash);
       if (state && state.missing) {
         ask(MSG2.missing, [{ title: MSG2.forget, forget: true }, { title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441 \u0434\u0438\u0441\u043A\u0430", remove: true }], (a) => {
           if (a.forget) {
-            forget(cardId);
-            reload();
+            forget(entry).then(reload);
           } else if (a.remove) {
-            remove(cardId).then((ok) => ok ? reload() : offerForget(cardId));
+            remove(entry).then((ok) => ok ? reload() : offerForget(entry));
           }
         });
         return;
       }
       ask(MSG2.confirm, [{ title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C", remove: true }], (a) => {
         if (!a.remove) return;
-        remove(cardId).then((ok) => ok ? reload() : offerForget(cardId));
+        remove(entry).then((ok) => ok ? reload() : offerForget(entry));
       });
     }
     comp.use({
       onCreate() {
         this.render(true).classList.add("lh-catalog", "lh-downloads");
-        const entries = store.preload.all().filter((e) => e.card && e.hash);
-        const results = entries.map((e) => {
-          const card = toWideCard(e.card);
-          card.lh_entry = e;
-          return card;
+        const show = guarded(this, (entries) => {
+          const results = entries.map((e) => {
+            const card = toWideCard(e.card);
+            card.lh_entry = e;
+            return card;
+          });
+          if (!results.length) return this.empty();
+          this.build({ results, total_pages: 1 });
+          refresh(true);
+          timer = setInterval(refresh, POLL_MS);
         });
-        if (!results.length) return this.empty();
-        this.build({ results, total_pages: 1 });
-        refresh(true);
-        timer = setInterval(refresh, POLL_MS);
+        listDownloads().catch((err) => {
+          if (!(err instanceof DlError)) console.error("lampa-home downloads", err);
+          L.Noty.show(MSG2.offline);
+          return cachedDownloads();
+        }).then(show);
       },
       onInstance(item, data) {
         const entry = data.lh_entry;
@@ -2074,13 +2190,13 @@
               badge.className = "lh-dl-badge";
               badge.textContent = "\u2026";
               view.appendChild(badge);
-              badges.set(entry.cardId, { el: badge, entry });
+              badges.set(entry.hash, { el: badge, entry });
             }
-            el.addEventListener("hover:long", guarded(comp, () => confirmRemove(entry.cardId)));
+            el.addEventListener("hover:long", guarded(comp, () => confirmRemove(entry)));
           },
           onEnter: guarded(comp, () => {
-            const state = badges.get(entry.cardId);
-            if (state && state.missing) return confirmRemove(entry.cardId);
+            const state = badges.get(entry.hash);
+            if (state && state.missing) return confirmRemove(entry);
             const { card, hash, index, kind, season, episode, absolute, title } = entry;
             startFromHash(hash, card, { kind, season, episode, absolute, index }, title);
           }),

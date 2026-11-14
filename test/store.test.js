@@ -110,3 +110,11 @@ test('test_prune_skips_malformed_entries', () => {
   assert.deepStrictEqual(Object.keys(storage.get(STORAGE_KEYS.progress, {})), ['3']);
   assert.deepStrictEqual(Object.keys(storage.get(STORAGE_KEYS.tvcache, {})), ['8']);
 });
+
+test('test_preload_replace_all', () => {
+  const { store } = make();
+  store.preload.set('movie:1', { added: 1 });
+  store.preload.replace({ 'tv:2': { added: 2, hash: 'h' } });
+  assert.strictEqual(store.preload.get('movie:1'), null);
+  assert.deepStrictEqual(store.preload.all(), [{ cardId: 'tv:2', added: 2, hash: 'h' }]);
+});

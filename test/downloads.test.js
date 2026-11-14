@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { preloadProgress, cardSnapshot, badgeLabel, replacePlan } from '../src/downloads.js';
+import { preloadProgress, cardSnapshot, badgeLabel, replacePlan, parseDownloadEntries, findExisting, legacyEntries } from '../src/downloads.js';
 
 const MiB = 1024 ** 2;
 const files = [
@@ -61,4 +61,82 @@ test('test_replace_plan', () => {
 
 test('test_badge_label_missing_on_server', () => {
   assert.strictEqual(badgeLabel({ missing: true, percent: 0, done: false }), 'Удалено на сервере');
+});
+
+const tsItem = (hash, data, extra = {}) => ({
+  hash, title: '[LAMPA] Release ' + hash.slice(0, 2), timestamp: 1700000000, torrent_size: 1000,
+  data: typeof data === 'string' ? data : JSON.stringify(data), ...extra,
+});
+const film = { id: 42, title: 'Синтел', original_title: 'Sintel' };
+const show = { id: 7, name: 'Фрирен', original_name: 'Frieren' };
+
+test('test_parse_entries_keeps_only_lh_preload', () => {
+  const list = [
+    tsItem('a'.repeat(40), { lampa: true, movie: film, lh_preload: { index: 2, kind: 'movie', added: 10, by: 'tv' } }),
+    // Played with «Играть» or added by Lampa itself: not a download.
+    tsItem('b'.repeat(40), { lampa: true, movie: film }),
+    tsItem('c'.repeat(40), { lampa: true, movie: show, lh_preload: { season: 1, episode: 5, absolute: 5, kind: 'anime', added: 20 } }),
+    { hash: 'd'.repeat(40), title: 'no data' },
+  ];
+  const out = parseDownloadEntries(list);
+  assert.deepStrictEqual(out.map((e) => e.hash[0]), ['c', 'a']);
+  assert.deepStrictEqual(out[1], {
+    key: 'movie:42', hash: 'a'.repeat(40), card: film, index: 2, season: undefined, episode: undefined,
+    absolute: undefined, kind: 'movie', added: 10, size: 1000, title: 'Release aa',
+  });
+  assert.strictEqual(out[0].key, 'tv:7');
+  // No index yet (the file pick was not saved): picked again at play time.
+  assert.strictEqual(out[0].index, undefined);
+  assert.strictEqual(out[0].episode, 5);
+});
+
+test('test_parse_entries_skips_bad_json', () => {
+  const list = [
+    tsItem('a'.repeat(40), '{"lampa":true,"movie":'),
+    tsItem('b'.repeat(40), 'null'),
+    tsItem('c'.repeat(40), { lampa: true, lh_preload: { added: 1 } }), // no card
+    tsItem('d'.repeat(40), { lampa: true, movie: film, lh_preload: 'yes' }),
+    tsItem('e'.repeat(40), { lampa: true, movie: film, lh_preload: { kind: 'movie', added: 1 } }),
+    null,
+  ];
+  assert.deepStrictEqual(parseDownloadEntries(list).map((e) => e.hash[0]), ['e']);
+  assert.deepStrictEqual(parseDownloadEntries(null), []);
+  assert.deepStrictEqual(parseDownloadEntries({ error: 'x' }), []);
+});
+
+test('test_parse_entries_newest_first', () => {
+  const list = [
+    tsItem('a'.repeat(40), { movie: film, lh_preload: { added: 100 } }),
+    tsItem('b'.repeat(40), { movie: show, lh_preload: { added: 300 } }),
+    // No `added`: TorrServer's own timestamp (seconds) is used.
+    tsItem('c'.repeat(40), { movie: { id: 9, title: 'X' }, lh_preload: {} }, { timestamp: 0.2 }),
+  ];
+  assert.deepStrictEqual(parseDownloadEntries(list).map((e) => e.hash[0]), ['b', 'c', 'a']);
+});
+
+test('test_find_existing_prefers_same_hash', () => {
+  const h1 = '1'.repeat(40);
+  const h2 = '2'.repeat(40);
+  const entries = [{ key: 'movie:42', hash: h2 }, { key: 'movie:42', hash: h1 }, { key: 'tv:42', hash: '3'.repeat(40) }];
+  assert.strictEqual(findExisting(entries, 'movie:42', h1).hash, h1);
+  assert.strictEqual(findExisting(entries, 'movie:42', '4'.repeat(40)).hash, h2);
+  assert.strictEqual(findExisting(entries, 'movie:9', h1), null);
+  assert.strictEqual(findExisting(null, 'movie:42', h1), null);
+});
+
+test('test_legacy_entries_only_unmarked_on_server', () => {
+  const h = (c) => c.repeat(40);
+  const list = [
+    tsItem(h('a'), { lampa: true, movie: film }), // old download, not marked yet
+    tsItem(h('b'), { lampa: true, movie: film, lh_preload: { added: 1 } }), // already marked
+  ];
+  const cached = [
+    { key: 'movie:42', hash: h('a'), card: film, index: 1, added: 5 },
+    { key: 'movie:42', hash: h('b'), card: film, added: 1 },
+    { key: 'tv:7', hash: h('c'), card: show, added: 9 }, // gone from the server
+  ];
+  const out = legacyEntries(list, cached);
+  assert.deepStrictEqual(out.map((e) => e.hash), [h('a')]);
+  assert.strictEqual(out[0].server.hash, h('a'));
+  assert.deepStrictEqual(legacyEntries(null, cached), []);
 });
