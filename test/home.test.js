@@ -25,9 +25,9 @@ test('test_full_history_row_gets_more', () => {
   assert.ok(row.total_pages >= 2);
 });
 
-test('test_short_history_row_has_no_more', () => {
+test('test_short_history_row_gets_more_too', () => {
   const [row] = buildRows([{ title: 'Недавно просмотренное', rowKey: 'history', results: cards(4) }]);
-  assert.strictEqual(row.total_pages, 1);
+  assert.ok(row.total_pages >= 2);
 });
 
 test('test_custom_row_params_carry_its_catalog', () => {
