@@ -1651,6 +1651,7 @@
     const row = rows.find((r) => r.params.lh_row === "movies") || rows[0];
     return row && pickBannerCard(row.results, storageField("lh_banner_random") === true);
   }
+  var FADE_MS = 400;
   function createBanner(comp, card) {
     const L = lampa();
     const opts = {
@@ -1673,8 +1674,12 @@
         const next = 1 - front;
         bgs[next].style.backgroundImage = url ? `url('${url.replace(/'/g, "%27")}')` : "none";
         bgs[next].classList.add("lh-banner__bg--on");
-        bgs[front].classList.remove("lh-banner__bg--on");
+        const old = bgs[front];
+        old.classList.remove("lh-banner__bg--on");
         front = next;
+        setTimeout(() => {
+          if (!destroyed && !old.classList.contains("lh-banner__bg--on")) old.style.backgroundImage = "none";
+        }, FADE_MS + 100);
       };
       if (!url) return apply();
       const img = new Image();
@@ -1693,7 +1698,11 @@
     }
     html.find(".selector").on("hover:focus", function() {
       last = this;
+      comp.lhOnBanner = true;
       L.Background.change(L.Utils.cardImgBackground(shown));
+    });
+    html.find(".selector").on("hover:enter", () => {
+      comp.lhOnBanner = true;
     });
     html.find(".lh-banner__play").on("hover:enter", () => run(shown));
     html.find(".lh-banner__more").on("hover:enter", () => L.Router.call("full", shown));
@@ -1703,6 +1712,7 @@
         L.Controller.add("lh_banner", {
           link: this,
           toggle: () => {
+            comp.lhOnBanner = true;
             L.Controller.collectionSet(el);
             L.Controller.collectionFocus(last, el);
           },

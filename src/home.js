@@ -27,6 +27,9 @@ export function bannerCard(rows) {
 // Sticky hero banner above the rows. It lives outside Main's transform-based scroll
 // (the scroll gets `minus(hero)` height), so it stays while the rows move under it,
 // and it follows the focused card (debounced, latest wins).
+// Matches the .lh-banner__bg opacity transition in styles.css.
+const FADE_MS = 400;
+
 function createBanner(comp, card) {
   const L = lampa();
   const opts = {
@@ -50,8 +53,14 @@ function createBanner(comp, card) {
       const next = 1 - front;
       bgs[next].style.backgroundImage = url ? `url('${url.replace(/'/g, '%27')}')` : 'none';
       bgs[next].classList.add('lh-banner__bg--on');
-      bgs[front].classList.remove('lh-banner__bg--on');
+      const old = bgs[front];
+      old.classList.remove('lh-banner__bg--on');
       front = next;
+      // After the 0.4s fade drop the hidden image, so weak TVs do not keep two 1280px
+      // backdrops decoded. Skipped if that layer was reused by a newer swap meanwhile.
+      setTimeout(() => {
+        if (!destroyed && !old.classList.contains('lh-banner__bg--on')) old.style.backgroundImage = 'none';
+      }, FADE_MS + 100);
     };
     if (!url) return apply();
     // Fade in only once the image is decoded, so the banner never flashes empty.
@@ -73,8 +82,14 @@ function createBanner(comp, card) {
 
   html.find('.selector').on('hover:focus', function () {
     last = this;
+    // However the banner got focus (keys, mouse, re-entry), resume on it after Back.
+    comp.lhOnBanner = true;
     // Same as the row cards: respects the user's background setting.
     L.Background.change(L.Utils.cardImgBackground(shown));
+  });
+  // A mouse click fires hover:enter without hover:focus, so mark the banner here too.
+  html.find('.selector').on('hover:enter', () => {
+    comp.lhOnBanner = true;
   });
   html.find('.lh-banner__play').on('hover:enter', () => play.run(shown));
   html.find('.lh-banner__more').on('hover:enter', () => L.Router.call('full', shown));
@@ -85,6 +100,7 @@ function createBanner(comp, card) {
       L.Controller.add('lh_banner', {
         link: this,
         toggle: () => {
+          comp.lhOnBanner = true;
           L.Controller.collectionSet(el);
           L.Controller.collectionFocus(last, el);
         },
