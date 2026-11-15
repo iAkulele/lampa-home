@@ -255,3 +255,26 @@ test('test_english_season_markers', () => {
   assert.deepStrictEqual(parseTitle('Shingeki no Kyojin TV-2 [AniDub]').seasons, [2]);
   assert.deepStrictEqual(parseTitle('Show Season 1-3 1080p').seasons, [1, 2, 3]);
 });
+
+// «Мстители: Судный день» (2026) must not launch «Мстители» (2012).
+test('test_movie_rejects_release_of_another_year', () => {
+  const old = 'Мстители / The Avengers (2012) BDRip 1080p | Дубляж';
+  const right = 'Мстители: Судный день / Avengers: Doomsday (2026) WEB-DL 1080p | Дубляж';
+  const noYear = 'Мстители Судный день WEB-DL 1080p Дубляж';
+  const names = ['Мстители: Судный день', 'Avengers: Doomsday'];
+  const res = selectTorrent([item(old, 500), item(right), item(noYear)], { kind: 'movie', year: 2026, names });
+  assert.strictEqual(find(res, old).rejected, 'unrelated');
+  assert.strictEqual(find(res, right).rejected, null);
+  assert.strictEqual(find(res, noYear).rejected, null);
+  assert.strictEqual(res.chosen.Title, right);
+});
+
+test('test_movie_year_check_tolerates_one_year_and_ranges', () => {
+  const near = 'Дюна / Dune (2020) 2160p RUS';
+  const far = 'Дюна / Dune (1984) 1080p RUS';
+  const pack = 'Дюна / Dune (2021-2024) 1080p RUS';
+  const res = selectTorrent([item(near), item(far), item(pack)], { kind: 'movie', year: 2021, names: ['Дюна', 'Dune'] });
+  assert.strictEqual(find(res, near).rejected, null);
+  assert.strictEqual(find(res, far).rejected, 'wrong-year');
+  assert.strictEqual(find(res, pack).rejected, null);
+});

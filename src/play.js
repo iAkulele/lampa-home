@@ -585,7 +585,10 @@ function dropUnlessPreloaded(hash) {
 export async function resolveTarget(card) {
   const first = detectKind(card);
   const { movie, details } = await fullCard(card, first);
-  if (first === 'movie') return { kind: first, ctx: { kind: first }, movie, tv: null };
+  if (first === 'movie') {
+    const year = Number(String(movie.release_date || '').slice(0, 4)) || 0;
+    return { kind: first, ctx: { kind: first, year }, movie, tv: null };
+  }
   // List cards (history, bookmarks) may carry no genres: anime or tv by the details.
   const kind = details && Array.isArray(details.genres)
     ? detectKind({

@@ -286,8 +286,26 @@ export function classifyAudio(p, result, ctx) {
   return out(false, null, { reason: 'no-russian' });
 }
 
+// Years a release title names: single years and ranges («2021-2024»), not
+// resolutions or sizes. [] when it names none.
+export function titleYears(title) {
+  const out = [];
+  const re = /(?<!\d)((?:19|20)\d\d)(?:\s*[-–]\s*((?:19|20)\d\d))?(?!\d)/g;
+  for (const m of String(title || '').matchAll(re)) out.push([Number(m[1]), Number(m[2] || m[1])]);
+  return out;
+}
+
+// A movie release that names years, none of them within a year of the film's.
+// Russian and US premieres may sit in different years, hence the tolerance.
+export function wrongYear(title, year) {
+  if (!year) return false;
+  const years = titleYears(title);
+  return years.length > 0 && !years.some(([a, b]) => year >= a - 1 && year <= b + 1);
+}
+
 function rejectReason(p, result, ctx) {
   if (!isRelevant(result.Title, ctx.names)) return 'unrelated';
+  if (ctx.kind === 'movie' && wrongYear(result.Title, ctx.year)) return 'wrong-year';
   if (p.screener) return 'screener';
   if (p.dvOnly) return 'dv-only';
   if (p.audioReason) return p.audioReason;

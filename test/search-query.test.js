@@ -143,3 +143,12 @@ test('test_anime_follow_ups_short_then_alt', () => {
   assert.ok(t.names.includes('Изгнанный читер-чародей'));
   assert.ok(t.names.includes('Изгнанный читер-чародей наслаждается беззаботной второй жизнью'));
 });
+
+test('test_movie_names_keep_the_subtitle', () => {
+  const card = { title: 'Мстители: Судный день', original_title: 'Avengers: Doomsday', release_date: '2026-12-16' };
+  const t = queryTitles(card, [], { kind: 'movie' });
+  assert.ok(!t.names.some((n) => n.toLowerCase() === 'мстители'));
+  assert.ok(!t.names.some((n) => n.toLowerCase() === 'avengers'));
+  assert.ok(t.names.includes('Мстители: Судный день'));
+  assert.ok(t.names.includes('Avengers: Doomsday'));
+});

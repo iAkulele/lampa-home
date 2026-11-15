@@ -121,7 +121,10 @@ export function queryTitles(card, alts = [], opts = {}) {
   const add = (n) => {
     if (n && !names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
   };
-  [rawRu, rawOriginal, ...alts, ...(opts.cyrillic || [])].forEach((n) => nameForms(n).forEach(add));
+  // Movies keep the whole name: the part before the colon is the franchise
+  // («Мстители: Судный день» -> «Мстители»), and matching it launched another film.
+  const forms = kind === 'movie' ? (n) => (isLatinOrCyrillic(n) ? [String(n).trim()] : []) : nameForms;
+  [rawRu, rawOriginal, ...alts, ...(opts.cyrillic || [])].forEach((n) => forms(n).forEach(add));
   if (kind === 'anime' && !names.some(isLatin)) names = [];
   return { title, original: original || title, alt, short: short !== title ? short : '', names };
 }
