@@ -153,7 +153,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
 }
 
 /* Episode badge "7 из 12" on series cards, loaded after render. */
-.lh-home .lh-badge {
+.lh-home .lh-badge,
+.lh-catalog .lh-badge {
   position: absolute;
   top: 0.4em;
   left: 0.4em;
@@ -166,6 +167,20 @@ body:not(.no--animation) .lh-catalog .card--wide {
   z-index: 2;
 }
 
+/* Airing-status badge, top-right; below the rating badge on wide cards (see .lh-badge--status). */
+.lh-home .lh-badge--status,
+.lh-catalog .lh-badge--status {
+  left: auto;
+  right: 0.4em;
+}
+.lh-home .lh-badge--airing,
+.lh-catalog .lh-badge--airing {
+  border-left: 3px solid #e50914;
+}
+.lh-home .lh-badge--done,
+.lh-catalog .lh-badge--done {
+  color: #aaa;
+}
 /* Catalog: chips row above a 4-column grid of the same wide 16:9 cards. */
 .lh-catalog .lh-catalog__head {
   padding: 1em 1.5em 0 1.5em;

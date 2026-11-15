@@ -63,6 +63,10 @@ export function applyPosterClass(cardEl, cardData) {
   cardEl.classList.add('lh-card--poster');
 }
 
+export function statusText(status) {
+  return status && status.airing ? 'Онгоинг' : 'Завершён';
+}
+
 // Adds the "N из M" badge to a card element once; skipped without usable status.
 export function applyBadge(cardEl, status) {
   if (!cardEl || !status || !status.total) return;
@@ -72,6 +76,27 @@ export function applyBadge(cardEl, status) {
   el.className = 'lh-badge';
   el.textContent = badgeText(status);
   view.appendChild(el);
+  const st = document.createElement('div');
+  st.className = `lh-badge lh-badge--status lh-badge--${status.airing ? 'airing' : 'done'}`;
+  st.textContent = statusText(status);
+  view.appendChild(st);
+}
+
+// Lazy badges for a card component: when the card scrolls into view, loads the TV
+// status (tvStatus is queued, 6 at a time) and adds the badges. use() hooks onVisible.
+export function attachEpisodeBadge(card, data, tvStatus, today) {
+  card.use({
+    onVisible() {
+      if (this.lhBadged) return;
+      this.lhBadged = true;
+      tvStatus(data.id, today()).then((status) => {
+        if (!this.destroyed) applyBadge(card.render(true), status);
+      });
+    },
+    onDestroy() {
+      this.destroyed = true;
+    },
+  });
 }
 
 // Banner source: the first card, or a random one among the first five.

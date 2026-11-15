@@ -149,3 +149,9 @@ test('test_banner_follows_focus_debounced', async () => {
   advance(500);
   assert.deepStrictEqual(shown, [4]);
 });
+
+test('test_status_text', async () => {
+  const { statusText } = await import('../src/cards.js');
+  assert.strictEqual(statusText({ airing: true }), 'Онгоинг');
+  assert.strictEqual(statusText({ airing: false }), 'Завершён');
+});

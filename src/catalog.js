@@ -2,8 +2,8 @@
 // cartoon / anime) with genre, year and sort chips above it.
 import { lampa, tmdbGet, store } from './lampa.js';
 import { catalogQuery, genresFor } from './tmdb-queries.js';
-import { toWideCard, applyPosterClass, hasRussianTitle } from './cards.js';
-import { todayIso } from './tmdb.js';
+import { toWideCard, applyPosterClass, hasRussianTitle, attachEpisodeBadge } from './cards.js';
+import { todayIso, tvStatus } from './tmdb.js';
 
 const NAME = 'lh_catalog';
 const FILTER_CONTROLLER = 'lh_catalog_filter';
@@ -229,6 +229,7 @@ function component(object) {
       }
     },
     onInstance(item, data) {
+      if ((kind === 'tv' || kind === 'anime') && data.original_name) attachEpisodeBadge(item, data, tvStatus, todayIso);
       item.use({
         onCreate() {
           applyPosterClass(item.render(true), data);

@@ -4,7 +4,7 @@ import * as play from './play.js';
 import * as catalog from './catalog.js';
 import { ROWS } from './config.js';
 import { loadRow, todayIso, tvStatus } from './tmdb.js';
-import { toWideCard, applyBadge, applyPosterClass, pickBannerCard, latestWins } from './cards.js';
+import { toWideCard, attachEpisodeBadge, applyPosterClass, pickBannerCard, latestWins } from './cards.js';
 import { BANNER, bannerText, bannerVars, genreMap } from './templates.js';
 
 const NAME = 'lh_home';
@@ -239,22 +239,12 @@ function component(object) {
       item.use({
         onMore: () => catalog.openForRow(rowKey),
         onInstance(card, cardData) {
+          if (wantsBadge(rowKey, cardData)) attachEpisodeBadge(card, cardData, tvStatus, todayIso);
           card.use({
             onCreate() {
               applyPosterClass(card.render(true), cardData);
             },
             onEnter: L.Router.call.bind(L.Router, 'full', cardData),
-            onVisible() {
-              // Fires when the card scrolls into view; the queue in tvStatus caps requests.
-              if (this.lhBadged || !wantsBadge(rowKey, cardData)) return;
-              this.lhBadged = true;
-              tvStatus(cardData.id, todayIso()).then((status) => {
-                if (!this.destroyed) applyBadge(card.render(true), status);
-              });
-            },
-            onDestroy() {
-              this.destroyed = true;
-            },
             onFocus() {
               comp.lhOnBanner = false;
               if (comp.lhBanner) comp.lhBanner.follow(cardData);

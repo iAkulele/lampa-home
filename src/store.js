@@ -19,6 +19,11 @@ export function createStore(storage, now = () => Date.now()) {
       all[cardId] = { season, episode, hash, updated: now() };
       storage.set(STORAGE_KEYS.progress, all);
     },
+    clear(cardId) {
+      const all = read(STORAGE_KEYS.progress);
+      delete all[cardId];
+      storage.set(STORAGE_KEYS.progress, all);
+    },
   };
 
   const seen = {

@@ -73,6 +73,12 @@ export function genreIds(card) {
   return (Array.isArray(card.genres) ? card.genres : []).map((g) => g && g.id).filter((id) => id != null);
 }
 
+// Progress the picker wrote early: kept only if playback started, else the previous value
+// comes back (null = nothing was stored). outcome: 'played' or anything else.
+export function progressAfterOutcome(prev, picked, outcome) {
+  return outcome === 'played' ? picked : prev;
+}
+
 export function detectKind(card) {
   if (!card || !card.original_name) return 'movie';
   const jp = (card.origin_country || []).includes('JP');
@@ -613,6 +619,9 @@ export async function run(card) {
     }, RUN_TIMEOUT_MS);
   };
   arm();
+  // Picker's early progress write is undone unless the run ends in playback.
+  let rollback = null;
+  let played = false;
   try {
     const target = await resolveTarget(card);
     const { movie } = target;
@@ -633,6 +642,7 @@ export async function run(card) {
       }
       ctx = picked;
       // Remembered at once: an external player may never report back.
+      rollback = { prev: store.progress.get(card.id) };
       store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: null });
       job.restart(MSG.search);
       arm();
@@ -669,6 +679,7 @@ export async function run(card) {
         job.hash = null;
       },
     });
+    played = outcome === 'played';
     if (outcome === 'played' || outcome === 'cancelled' || job.cancelled) return;
     finish();
     L.Noty.show(outcome === 'nofile-prev' ? MSG.notYet(ctx.episode) : MSG.noFile);
@@ -681,6 +692,12 @@ export async function run(card) {
     if (!(err instanceof PlayError)) console.error('lampa-home play', err);
     L.Noty.show(msg);
     openNativeList(params);
+  } finally {
+    if (rollback && !played) {
+      const prev = progressAfterOutcome(rollback.prev, null, 'failed');
+      if (prev) store.progress.set(card.id, { season: prev.season, episode: prev.episode, hash: prev.hash });
+      else store.progress.clear(card.id);
+    }
   }
 }
 

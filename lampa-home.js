@@ -155,7 +155,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
 }
 
 /* Episode badge "7 \u0438\u0437 12" on series cards, loaded after render. */
-.lh-home .lh-badge {
+.lh-home .lh-badge,
+.lh-catalog .lh-badge {
   position: absolute;
   top: 0.4em;
   left: 0.4em;
@@ -168,6 +169,20 @@ body:not(.no--animation) .lh-catalog .card--wide {
   z-index: 2;
 }
 
+/* Airing-status badge, top-right; below the rating badge on wide cards (see .lh-badge--status). */
+.lh-home .lh-badge--status,
+.lh-catalog .lh-badge--status {
+  left: auto;
+  right: 0.4em;
+}
+.lh-home .lh-badge--airing,
+.lh-catalog .lh-badge--airing {
+  border-left: 3px solid #e50914;
+}
+.lh-home .lh-badge--done,
+.lh-catalog .lh-badge--done {
+  color: #aaa;
+}
 /* Catalog: chips row above a 4-column grid of the same wide 16:9 cards. */
 .lh-catalog .lh-catalog__head {
   padding: 1em 1.5em 0 1.5em;
@@ -307,6 +322,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
       set(cardId, { season, episode, hash }) {
         const all = read(STORAGE_KEYS.progress);
         all[cardId] = { season, episode, hash, updated: now() };
+        storage2.set(STORAGE_KEYS.progress, all);
+      },
+      clear(cardId) {
+        const all = read(STORAGE_KEYS.progress);
+        delete all[cardId];
         storage2.set(STORAGE_KEYS.progress, all);
       }
     };
@@ -954,6 +974,9 @@ body:not(.no--animation) .lh-catalog .card--wide {
     if (!cardEl || !cardData || !cardData.lh_poster_fallback) return;
     cardEl.classList.add("lh-card--poster");
   }
+  function statusText(status2) {
+    return status2 && status2.airing ? "\u041E\u043D\u0433\u043E\u0438\u043D\u0433" : "\u0417\u0430\u0432\u0435\u0440\u0448\u0451\u043D";
+  }
   function applyBadge(cardEl, status2) {
     if (!cardEl || !status2 || !status2.total) return;
     const view = cardEl.querySelector(".card__view");
@@ -962,6 +985,24 @@ body:not(.no--animation) .lh-catalog .card--wide {
     el.className = "lh-badge";
     el.textContent = badgeText(status2);
     view.appendChild(el);
+    const st = document.createElement("div");
+    st.className = `lh-badge lh-badge--status lh-badge--${status2.airing ? "airing" : "done"}`;
+    st.textContent = statusText(status2);
+    view.appendChild(st);
+  }
+  function attachEpisodeBadge(card, data, tvStatus2, today) {
+    card.use({
+      onVisible() {
+        if (this.lhBadged) return;
+        this.lhBadged = true;
+        tvStatus2(data.id, today()).then((status2) => {
+          if (!this.destroyed) applyBadge(card.render(true), status2);
+        });
+      },
+      onDestroy() {
+        this.destroyed = true;
+      }
+    });
   }
   function pickBannerCard(cards, random, rnd = Math.random) {
     if (!cards || !cards.length) return void 0;
@@ -1385,6 +1426,9 @@ body:not(.no--animation) .lh-catalog .card--wide {
     if (!card) return [];
     if (Array.isArray(card.genre_ids) && card.genre_ids.length) return card.genre_ids;
     return (Array.isArray(card.genres) ? card.genres : []).map((g) => g && g.id).filter((id) => id != null);
+  }
+  function progressAfterOutcome(prev, picked, outcome) {
+    return outcome === "played" ? picked : prev;
   }
   function detectKind(card) {
     if (!card || !card.original_name) return "movie";
@@ -1813,6 +1857,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
       }, RUN_TIMEOUT_MS);
     };
     arm();
+    let rollback = null;
+    let played = false;
     try {
       const target = await resolveTarget(card);
       const { movie } = target;
@@ -1831,6 +1877,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
           return;
         }
         ctx = picked;
+        rollback = { prev: store.progress.get(card.id) };
         store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: null });
         job.restart(MSG.search);
         arm();
@@ -1870,6 +1917,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
           job.hash = null;
         }
       });
+      played = outcome === "played";
       if (outcome === "played" || outcome === "cancelled" || job.cancelled) return;
       finish();
       L.Noty.show(outcome === "nofile-prev" ? MSG.notYet(ctx.episode) : MSG.noFile);
@@ -1882,6 +1930,12 @@ body:not(.no--animation) .lh-catalog .card--wide {
       if (!(err instanceof PlayError)) console.error("lampa-home play", err);
       L.Noty.show(msg);
       openNativeList(params);
+    } finally {
+      if (rollback && !played) {
+        const prev = progressAfterOutcome(rollback.prev, null, "failed");
+        if (prev) store.progress.set(card.id, { season: prev.season, episode: prev.episode, hash: prev.hash });
+        else store.progress.clear(card.id);
+      }
     }
   }
   async function startFromHash(hash, card, ctx, title) {
@@ -2121,6 +2175,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
         }
       },
       onInstance(item, data) {
+        if ((kind === "tv" || kind === "anime") && data.original_name) attachEpisodeBadge(item, data, tvStatus, todayIso);
         item.use({
           onCreate() {
             applyPosterClass(item.render(true), data);
@@ -2421,21 +2476,12 @@ body:not(.no--animation) .lh-catalog .card--wide {
         item.use({
           onMore: () => openForRow(rowKey),
           onInstance(card, cardData) {
+            if (wantsBadge(rowKey, cardData)) attachEpisodeBadge(card, cardData, tvStatus, todayIso);
             card.use({
               onCreate() {
                 applyPosterClass(card.render(true), cardData);
               },
               onEnter: L.Router.call.bind(L.Router, "full", cardData),
-              onVisible() {
-                if (this.lhBadged || !wantsBadge(rowKey, cardData)) return;
-                this.lhBadged = true;
-                tvStatus(cardData.id, todayIso()).then((status2) => {
-                  if (!this.destroyed) applyBadge(card.render(true), status2);
-                });
-              },
-              onDestroy() {
-                this.destroyed = true;
-              },
               onFocus() {
                 comp.lhOnBanner = false;
                 if (comp.lhBanner) comp.lhBanner.follow(cardData);
