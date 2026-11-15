@@ -8,7 +8,8 @@
     "build": "esbuild src/index.js --bundle --format=iife --target=es2019 --loader:.css=text --outfile=lampa-home.js",
     "test": "node --test \"test/**/*.test.js\"",
     "serve": "node dev/serve.cjs",
-    "dev:fetch": "git clone --depth 1 https://github.com/yumata/lampa-source .lampa-source"
+    "dev:fetch": "git clone --depth 1 https://github.com/yumata/lampa-source .lampa-source",
+    "release": "npm run build && git add lampa-home.js && git commit -m \"build: lampa-home.js\" && git push"
   },
   "license": "ISC",
   "devDependencies": {
