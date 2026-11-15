@@ -3,7 +3,7 @@ import { lampa, storageField } from './lampa.js';
 import * as play from './play.js';
 import * as catalog from './catalog.js';
 import { ROWS } from './config.js';
-import { loadRow, todayIso, tvStatus } from './tmdb.js';
+import { loadRow, todayIso, tvStatus, HISTORY_LIMIT } from './tmdb.js';
 import { toWideCard, attachEpisodeBadge, applyPosterClass, pickBannerCard, latestWins } from './cards.js';
 import { BANNER, bannerText, bannerVars, genreMap } from './templates.js';
 
@@ -126,13 +126,22 @@ function createBanner(comp, card) {
   };
 }
 
+// Lampa shows «Ещё» only when total_pages > 1 (line/module/more.js). A row's own TMDB
+// query is narrower than its catalog (e.g. «Русское»: last 365 days, often one page),
+// so every row with a catalog reports at least 2. History has no pages: «Ещё» (Lampa's
+// history screen) only when the row is full.
+export function rowPages(rowKey, count, total) {
+  if (rowKey === 'history') return count >= HISTORY_LIMIT ? 2 : 1;
+  return Math.max(2, total || 1);
+}
+
 export function buildRows(loaded) {
   return loaded
     .filter((row) => row.results.length)
     .map((row) => ({
       title: row.title,
       results: row.results.map(toWideCard),
-      total_pages: row.total_pages || 1,
+      total_pages: rowPages(row.rowKey, row.results.length, row.total_pages),
       params: { items: { view: 6 }, lh_row: row.rowKey },
     }));
 }

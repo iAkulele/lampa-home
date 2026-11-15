@@ -5,7 +5,7 @@ import { createQueue } from './queue.js';
 import { rowQuery } from './tmdb-queries.js';
 import { rowTitle, hasRussianTitle, fillPages, isAnimeCard, rowHidesAnime } from './cards.js';
 
-const HISTORY_LIMIT = 20;
+export const HISTORY_LIMIT = 20;
 
 // Local calendar date as YYYY-MM-DD.
 export function todayIso(d = new Date()) {
