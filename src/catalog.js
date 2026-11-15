@@ -16,6 +16,12 @@ export const KIND_TITLES = { movie: 'Фильмы', tv: 'Сериалы', cartoo
 
 const SORT_TITLES = { new: 'Сначала новые', rating: 'По рейтингу' };
 
+// «Происхождение»: all or Russian originals. Anime is Japanese by definition.
+const ORIGIN_TITLES = { null: 'все', ru: 'русские' };
+const RU_TITLES = { movie: 'Русские фильмы', tv: 'Русские сериалы', cartoon: 'Русские мультфильмы' };
+export const hasOriginFilter = (kind) => kind in RU_TITLES;
+export const catalogTitle = (kind, lang) => (lang === 'ru' && RU_TITLES[kind]) || KIND_TITLES[kind];
+
 // Home row -> catalog kind and the filters it opens with. history has no catalog.
 // The rows are "new" lists, so their catalogs always open on sort 'new' with no year.
 const FRESH = { genre: null, year: null, sort: 'new', lang: null };
@@ -60,6 +66,7 @@ export function chosenLabels(kind, f) {
     genre: `Жанр: ${genreName(kind, f.genre)}`,
     year: `Год: ${year}`,
     sort: SORT_TITLES[f.sort] || SORT_TITLES.new,
+    lang: `Происхождение: ${ORIGIN_TITLES[f.lang === 'ru' ? 'ru' : null]}`,
   };
 }
 
@@ -131,10 +138,13 @@ function component(object) {
     L.Controller.toggle(FILTER_CONTROLLER);
   }
 
-  // Saves the filters and rebuilds the screen from page 1.
+  // Saves the filters and rebuilds the screen from page 1. lang lives in the
+  // activity (Activity.replace keeps it), not in the stored filters.
   function apply(patch) {
     store.filters.set(kind, { ...f, ...patch });
-    L.Activity.replace({ page: 1 });
+    const next = { page: 1 };
+    if ('lang' in patch) Object.assign(next, { lang: patch.lang, title: catalogTitle(kind, patch.lang) });
+    L.Activity.replace(next);
   }
 
   function pick(title, items, current, onPick) {
@@ -151,7 +161,7 @@ function component(object) {
     filter.set('filter', [
       { title: labels.genre, lh: 'genre' },
       { title: labels.year, lh: 'year' },
-    ]);
+    ].concat(hasOriginFilter(kind) ? [{ title: labels.lang, lh: 'lang' }] : []));
     filter.set('sort', Object.keys(SORT_TITLES).map((key) => ({
       title: SORT_TITLES[key], lh: key, selected: key === f.sort,
     })));
@@ -166,6 +176,8 @@ function component(object) {
           genresFor(kind).map((g) => ({ title: g.title, value: g.id })),
         );
         pick('Жанр', genres, f.genre, (genre) => apply({ genre }));
+      } else if (a.lh === 'lang') {
+        pick('Происхождение', [{ title: 'Все', value: null }, { title: 'Русские', value: 'ru' }], f.lang, (lang) => apply({ lang }));
       } else {
         pick('Год', yearOptions(todayIso()), f.year, (year) => apply({ year }));
       }
@@ -174,7 +186,8 @@ function component(object) {
     const line = filter.render();
     line.find('.filter--search').remove();
     // Not filter.chosen(): it cuts the text to 25 chars ("Жанр: Ужасы...: 2000–2009").
-    line.find('.filter--filter > div').text(`${labels.genre}, ${labels.year}`).removeClass('hide');
+    const chosen = [labels.genre, labels.year].concat(f.lang === 'ru' ? ['русские'] : []);
+    line.find('.filter--filter > div').text(chosen.join(', ')).removeClass('hide');
     line.find('.filter--sort > div').text(labels.sort).removeClass('hide');
     line.find('.selector').on('hover:focus', (e) => {
       lastChip = e.target;
@@ -257,7 +270,7 @@ export function register() {
 export function open(kind, preset) {
   if (preset) store.filters.set(kind, applyPreset(store.filters.get(kind), preset));
   const lang = (preset && preset.lang) || null;
-  const title = lang === 'ru' ? (kind === 'tv' ? 'Русские сериалы' : 'Русское') : KIND_TITLES[kind];
+  const title = catalogTitle(kind, lang);
   lampa().Activity.push({ url: '', component: NAME, kind, lang, title, page: 1, source: 'tmdb' });
 }
 

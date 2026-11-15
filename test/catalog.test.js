@@ -9,6 +9,8 @@ import {
   guarded,
   dedupe,
   KIND_TITLES,
+  hasOriginFilter,
+  catalogTitle,
 } from '../src/catalog.js';
 
 test('test_preset_for_russian', () => {
@@ -56,11 +58,13 @@ test('test_genre_name_and_chosen_labels', () => {
     genre: 'Жанр: Ужасы',
     year: 'Год: все',
     sort: 'Сначала новые',
+    lang: 'Происхождение: все',
   });
   assert.deepStrictEqual(chosenLabels('tv', { genre: null, year: '2000-2009', sort: 'rating' }), {
     genre: 'Жанр: все',
     year: 'Год: 2000–2009',
     sort: 'По рейтингу',
+    lang: 'Происхождение: все',
   });
 });
 
@@ -89,4 +93,17 @@ test('test_dedupe_skips_ids_already_shown', () => {
   assert.deepStrictEqual(dedupe([{ id: 2 }, { id: 3 }, { id: 3 }], seen).map((c) => c.id), [3]);
   // cards without an id are kept
   assert.strictEqual(dedupe([{ title: 'x' }], seen).length, 1);
+});
+
+test('test_origin_filter_label_and_kinds', () => {
+  assert.strictEqual(chosenLabels('movie', { genre: null, year: null, sort: 'new', lang: 'ru' }).lang, 'Происхождение: русские');
+  assert.strictEqual(chosenLabels('tv', { genre: null, year: null, sort: 'new', lang: null }).lang, 'Происхождение: все');
+  assert.deepStrictEqual(['movie', 'tv', 'cartoon', 'anime'].map(hasOriginFilter), [true, true, true, false]);
+});
+
+test('test_catalog_title_follows_origin', () => {
+  assert.strictEqual(catalogTitle('movie', 'ru'), 'Русские фильмы');
+  assert.strictEqual(catalogTitle('tv', 'ru'), 'Русские сериалы');
+  assert.strictEqual(catalogTitle('cartoon', 'ru'), 'Русские мультфильмы');
+  assert.strictEqual(catalogTitle('movie', null), 'Фильмы');
 });
