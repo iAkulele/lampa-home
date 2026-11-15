@@ -1,7 +1,8 @@
-// Settings section "Lampa Home": banner, random banner, notifications, episode picker, PC helper address, cache reset.
+// Settings section "Lampa Home": home rows, banner, random banner, notifications, episode picker, PC helper address, cache reset.
 import { lampa, storage, noty } from './lampa.js';
 import { STORAGE_KEYS } from './config.js';
 import { HELPER_DEFAULT } from './downloads.js';
+import * as rowsEditor from './rows-editor.js';
 
 const COMPONENT = 'lh_settings';
 const ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
@@ -16,6 +17,12 @@ export function resetCache() {
 export function register() {
   const api = lampa().SettingsApi;
   api.addComponent({ component: COMPONENT, name: 'Lampa Home', icon: ICON });
+  api.addParam({
+    component: COMPONENT,
+    param: { name: 'lh_rows_edit', type: 'button' },
+    field: { name: 'Ленты главной', description: 'Включить или скрыть ленты, добавить ленту по жанру. Применяется при следующем открытии главной' },
+    onChange: rowsEditor.open,
+  });
   api.addParam({
     component: COMPONENT,
     param: { name: 'lh_banner', type: 'trigger', default: true },

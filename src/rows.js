@@ -3,7 +3,7 @@
 // { disabled: [rowKey...], custom: [{id, kind, genre}] }; configs are never mutated.
 import { ROWS } from './config.js';
 import { catalogQuery, genresFor } from './tmdb-queries.js';
-import { hasRussianTitle, isAnimeCard, kindHidesAnime } from './cards.js';
+import { hasRussianTitle, isAnimeCard, kindHidesAnime, rowTitle } from './cards.js';
 
 export const CUSTOM_PREFIX = 'custom:';
 
@@ -83,6 +83,44 @@ export const customRowQuery = (row, page, today) => catalogQuery(row.kind, custo
 
 // Same card filter as the catalog: Russian titles only; anime only in anime rows.
 export const customRowKeeps = (kind) => (card) => hasRussianTitle(card) && !(kindHidesAnime(kind) && isAnimeCard(card));
+
+// ---------- Lampa.Select items of the «Ленты главной» editor (rows-editor.js) ----------
+
+const KIND_TITLES = { movie: 'Фильмы', tv: 'Сериалы', cartoon: 'Мультфильмы', anime: 'Аниме' };
+
+// Built-ins as checkboxes (toggled in place), then custom rows, then "add".
+export function editorItems(cfg) {
+  const items = [{ title: 'Встроенные ленты', separator: true }];
+  for (const key of ROWS) {
+    items.push({ title: rowTitle(key), checkbox: true, checked: isRowEnabled(cfg, key), lh: { type: 'builtin', key } });
+  }
+  if (cfg.custom.length) {
+    items.push({ title: 'Свои ленты', separator: true });
+    for (const r of cfg.custom) items.push({ title: customRowTitle(r), lh: { type: 'custom', id: r.id } });
+  }
+  items.push({ title: '+ Добавить ленту по жанру', lh: { type: 'add' } });
+  return items;
+}
+
+export function customActions(cfg, id) {
+  const i = cfg.custom.findIndex((r) => r.id === id);
+  const items = [];
+  if (i > 0) items.push({ title: 'Выше', action: 'up' });
+  if (i >= 0 && i < cfg.custom.length - 1) items.push({ title: 'Ниже', action: 'down' });
+  items.push({ title: 'Удалить', action: 'remove' });
+  return items;
+}
+
+export const kindItems = () => CUSTOM_KINDS.map((kind) => ({ title: KIND_TITLES[kind], kind }));
+
+// Genres of a kind; ones already on the home screen are dimmed.
+export function genreItems(cfg, kind) {
+  return genresFor(kind).map((g) => {
+    const item = { title: g.title, genre: g.id };
+    if (hasCustomRow(cfg, kind, g.id)) Object.assign(item, { ghost: true, subtitle: 'Уже на главной' });
+    return item;
+  });
+}
 
 export function newRowId(now = Date.now(), rnd = Math.random) {
   return now.toString(36) + Math.floor(rnd() * 1e6).toString(36);

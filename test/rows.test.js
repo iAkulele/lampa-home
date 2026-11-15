@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { ROWS } from '../src/config.js';
-import { catalogQuery } from '../src/tmdb-queries.js';
+import { catalogQuery, genresFor } from '../src/tmdb-queries.js';
 import {
   normalizeRowsConfig,
   homeRows,
@@ -17,6 +17,10 @@ import {
   customRowKeeps,
   customRowOf,
   newRowId,
+  editorItems,
+  customActions,
+  kindItems,
+  genreItems,
 } from '../src/rows.js';
 
 const cfg = (disabled = [], custom = []) => ({ disabled, custom });
@@ -151,6 +155,52 @@ test('test_custom_row_of_finds_row_by_key', () => {
   assert.deepStrictEqual(customRowOf(c, 'custom:a'), { id: 'a', kind: 'movie', genre: 35 });
   assert.strictEqual(customRowOf(c, 'custom:b'), null);
   assert.strictEqual(customRowOf(c, 'movies'), null);
+});
+
+test('test_editor_items_builtins_checkboxes_then_custom_then_add', () => {
+  const c = cfg(['horror'], [{ id: 'a', kind: 'movie', genre: 35 }]);
+  const items = editorItems(c);
+  const builtins = items.filter((i) => i.lh && i.lh.type === 'builtin');
+  assert.deepStrictEqual(builtins.map((i) => i.lh.key), ROWS);
+  assert.ok(builtins.every((i) => i.checkbox === true));
+  assert.strictEqual(builtins.find((i) => i.lh.key === 'horror').checked, false);
+  assert.strictEqual(builtins.find((i) => i.lh.key === 'movies').checked, true);
+  assert.strictEqual(builtins.find((i) => i.lh.key === 'movies').title, 'Новые фильмы');
+  const customItems = items.filter((i) => i.lh && i.lh.type === 'custom');
+  assert.deepStrictEqual(customItems.map((i) => [i.title, i.lh.id]), [['Комедия · фильмы', 'a']]);
+  const last = items[items.length - 1];
+  assert.strictEqual(last.title, '+ Добавить ленту по жанру');
+  assert.strictEqual(last.lh.type, 'add');
+  // custom rows come after every built-in and before "add"
+  const pos = (pred) => items.findIndex(pred);
+  assert.ok(pos((i) => i.lh && i.lh.type === 'custom') > pos((i) => i.lh && i.lh.key === 'history'));
+});
+
+test('test_custom_actions_skip_impossible_moves', () => {
+  const c = cfg([], [
+    { id: 'a', kind: 'movie', genre: 35 },
+    { id: 'b', kind: 'movie', genre: 18 },
+  ]);
+  assert.deepStrictEqual(customActions(c, 'a').map((i) => i.title), ['Ниже', 'Удалить']);
+  assert.deepStrictEqual(customActions(c, 'b').map((i) => i.title), ['Выше', 'Удалить']);
+  const one = cfg([], [{ id: 'a', kind: 'movie', genre: 35 }]);
+  assert.deepStrictEqual(customActions(one, 'a').map((i) => i.title), ['Удалить']);
+});
+
+test('test_kind_items_in_catalog_order', () => {
+  assert.deepStrictEqual(kindItems().map((i) => [i.title, i.kind]), [
+    ['Фильмы', 'movie'], ['Сериалы', 'tv'], ['Мультфильмы', 'cartoon'], ['Аниме', 'anime'],
+  ]);
+});
+
+test('test_genre_items_mark_rows_already_added', () => {
+  const c = cfg([], [{ id: 'a', kind: 'movie', genre: 35 }]);
+  const items = genreItems(c, 'movie');
+  assert.strictEqual(items.length, genresFor('movie').length);
+  const comedy = items.find((i) => i.genre === 35);
+  assert.strictEqual(comedy.ghost, true);
+  assert.ok(comedy.subtitle);
+  assert.strictEqual(items.find((i) => i.genre === 28).ghost, undefined);
 });
 
 test('test_new_row_id_is_unique_string', () => {
