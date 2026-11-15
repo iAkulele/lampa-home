@@ -131,7 +131,7 @@ export function parseTitle(title) {
     russian: RE_RUSSIAN.test(audioText) || studio !== null,
     voice: detectVoice(t, studio, audioText),
     explicitVoice: studio !== null || RE_VOICE.test(audioText),
-    extAudio: RE_EXT.test(t),
+    extAudio: RE_EXT.test(audioText),
     raw: RE_RAW.test(t),
     subsOnly: RE_SUBS_ONLY.test(t),
     animeStudio: RE_ANIME_STUDIO.test(audioText),
@@ -241,7 +241,7 @@ export function classifyAudio(p, result, ctx) {
   const animeStudio = anime && (p.animeStudio || RE_ANIME_STUDIO.test(voices));
   const out = (russian, voice, extra) => ({ russian, voice, studio: p.studio, penalty: 0, reason: null, ...extra });
 
-  if (p.raw && !(p.explicitVoice || animeStudio)) return out(false, null, { reason: 'raw' });
+  if (anime && p.raw && !(p.explicitVoice || animeStudio)) return out(false, null, { reason: 'raw' });
   if (p.extAudio) return out(true, p.voice || 'other', { penalty: SCORING.extAudioPenalty });
   if (p.russian || animeStudio) return out(true, p.voice || 'other');
   const meta = audioFromResult(result);

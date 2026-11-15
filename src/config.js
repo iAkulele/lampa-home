@@ -53,7 +53,7 @@ export const VOICE_MARKERS =
 // Russian audio as a separate (external) track: Russian, but scored lower.
 export const EXT_AUDIO_MARKERS = 'rus[\\s.]*\\(?\\s*ext|внешн';
 
-// Raw: original audio without a voice-over.
+// Raw: original audio without a voice-over (anime only: "Raw" is also a film title).
 export const RAW_MARKERS = '(?<![\\p{L}\\d])raws?(?![\\p{L}\\d])';
 
 // Subtitle-only releases (fansub groups, "Sub", "СТ", "субтитры").

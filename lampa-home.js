@@ -563,7 +563,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
       russian: RE_RUSSIAN.test(audioText) || studio !== null,
       voice: detectVoice(t, studio, audioText),
       explicitVoice: studio !== null || RE_VOICE.test(audioText),
-      extAudio: RE_EXT.test(t),
+      extAudio: RE_EXT.test(audioText),
       raw: RE_RAW.test(t),
       subsOnly: RE_SUBS_ONLY.test(t),
       animeStudio: RE_ANIME_STUDIO.test(audioText),
@@ -644,7 +644,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const voices = info && Array.isArray(info.voices) ? info.voices.join(" ") : "";
     const animeStudio = anime && (p.animeStudio || RE_ANIME_STUDIO.test(voices));
     const out = (russian, voice, extra) => ({ russian, voice, studio: p.studio, penalty: 0, reason: null, ...extra });
-    if (p.raw && !(p.explicitVoice || animeStudio)) return out(false, null, { reason: "raw" });
+    if (anime && p.raw && !(p.explicitVoice || animeStudio)) return out(false, null, { reason: "raw" });
     if (p.extAudio) return out(true, p.voice || "other", { penalty: SCORING.extAudioPenalty });
     if (p.russian || animeStudio) return out(true, p.voice || "other");
     const meta = audioFromResult(result);
@@ -1023,6 +1023,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   // src/search-query.js
   var MIN_TITLE = 4;
   var MAX_TITLE = 60;
+  var MIN_TWO_WORDS = 12;
   var LONG_TITLE = 40;
   var FEW_RESULTS = 5;
   var FOREIGN = /(?=\p{L})[^\p{Script=Latin}\p{Script=Cyrillic}]/u;
@@ -1034,6 +1035,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const s = String(str || "");
     return isLatinOrCyrillic(s) && /\p{Script=Latin}/u.test(s) && !/\p{Script=Cyrillic}/u.test(s);
   }
+  var hasCyrillic = (str) => /\p{Script=Cyrillic}/u.test(String(str || ""));
   function shortTitle(name) {
     const original = String(name || "").trim();
     let s = original;
@@ -1047,18 +1049,20 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }
     return s;
   }
-  function queryTitle(name) {
+  function queryTitle(name, kind) {
     const s = String(name || "").trim();
     if (!isLatinOrCyrillic(s)) return "";
+    if (kind === "movie") return s;
     return s.length > LONG_TITLE ? shortTitle(s) : s;
   }
-  function latinAltTitles(json) {
-    const list = json && (json.results || json.titles) || [];
-    const rank = (c) => c === "JP" ? 0 : c === "US" ? 1 : 2;
+  function altList(json) {
+    return json && (json.results || json.titles) || [];
+  }
+  function uniqueShort(titles) {
     const out = [];
     const seen = /* @__PURE__ */ new Set();
-    list.filter((t) => t && (t.iso_3166_1 === "JP" || t.iso_3166_1 === "US") && isLatin(t.title)).sort((a, b) => rank(a.iso_3166_1) - rank(b.iso_3166_1)).forEach((t) => {
-      const s = shortTitle(t.title);
+    titles.forEach((title) => {
+      const s = shortTitle(title);
       const key = s.toLowerCase();
       if (s.length >= MIN_TITLE && !seen.has(key)) {
         seen.add(key);
@@ -1067,19 +1071,41 @@ body:not(.no--animation) .lh-catalog .card--wide {
     });
     return out;
   }
-  function queryTitles(card, alts = []) {
-    const ru = queryTitle(card.title || card.name);
+  function latinAltTitles(json) {
+    const rank = (c) => c === "JP" ? 0 : 1;
+    return uniqueShort(altList(json).filter((t) => t && (t.iso_3166_1 === "JP" || t.iso_3166_1 === "US") && isLatin(t.title)).sort((a, b) => rank(a.iso_3166_1) - rank(b.iso_3166_1)).map((t) => t.title));
+  }
+  function cyrillicAltTitles(json) {
+    return uniqueShort(altList(json).filter((t) => t && (t.iso_3166_1 === "RU" || t.iso_3166_1 === "UA") && hasCyrillic(t.title) && isLatinOrCyrillic(t.title)).map((t) => t.title));
+  }
+  function nameForms(name) {
+    const s = String(name || "").trim();
+    if (!s || !isLatinOrCyrillic(s)) return [];
+    const cuts = [":", " \u2014 ", "("].map((c) => s.indexOf(c)).filter((i) => i >= 0);
+    const head = cuts.length ? s.slice(0, Math.min(...cuts)).trim() : s;
+    const out = [head.length >= MIN_TITLE ? head : s, shortTitle(s)];
+    if (s.length > LONG_TITLE) {
+      const two = s.split(/\s+/).slice(0, 2).join(" ").replace(/[:,.(—–~]+$/, "");
+      if (two.length >= MIN_TWO_WORDS) out.push(two);
+    }
+    return out;
+  }
+  function queryTitles(card, alts = [], opts = {}) {
+    const kind = opts.kind;
+    const rawRu = card.title || card.name || "";
     const rawOriginal = card.original_title || card.original_name || "";
-    const original = queryTitle(rawOriginal);
+    const ru = queryTitle(rawRu, kind);
+    const original = queryTitle(rawOriginal, kind);
     const alt = alts[0] || "";
     const title = ru || alt || original;
-    const names = [];
+    const short = ru ? shortTitle(ru) : "";
+    let names = [];
     const add = (n) => {
-      const s = shortTitle(n);
-      if (s && isLatinOrCyrillic(s) && !names.some((x) => x.toLowerCase() === s.toLowerCase())) names.push(s);
+      if (n && !names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
     };
-    [card.title || card.name, rawOriginal, ...alts].forEach(add);
-    return { title, original: original || title, alt, names };
+    [rawRu, rawOriginal, ...alts, ...opts.cyrillic || []].forEach((n) => nameForms(n).forEach(add));
+    if (kind === "anime" && !names.some(isLatin)) names = [];
+    return { title, original: original || title, alt, short: short !== title ? short : "", names };
   }
   function searchParamsFor(card, ctx, parseLang, title, original) {
     const year = String(card.first_air_date || card.release_date || "0000").slice(0, 4);
@@ -1108,14 +1134,25 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const movie = withTitles(card, t.title, t.original);
     return searchParamsFor(movie, ctx, parseLang, t.title, t.original);
   }
+  var same = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
   function secondQuery(card, ctx, t) {
     if (!t.alt) return null;
-    const same = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
     if (same(t.alt, t.title) || same(t.alt, t.original)) return null;
     const movie = withTitles(card, t.title, t.alt);
     return searchParamsFor(movie, ctx, "df", t.title, t.alt);
   }
+  function shortQuery(card, ctx, t) {
+    if (!t.short || same(t.short, t.title)) return null;
+    const movie = withTitles(card, t.short, t.short);
+    return searchParamsFor(movie, ctx, "lg", t.short, t.short);
+  }
   var needSecond = (kind, count) => kind === "anime" || count < FEW_RESULTS;
+  function followUpQueries(card, ctx, t, firstCount) {
+    const out = [];
+    if (firstCount < FEW_RESULTS) out.push(shortQuery(card, ctx, t));
+    if (needSecond(ctx.kind, firstCount)) out.push(secondQuery(card, ctx, t));
+    return out.filter(Boolean);
+  }
   function mergeResults(...lists) {
     const out = [];
     const links = /* @__PURE__ */ new Set();
@@ -1154,6 +1191,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     search: "\u0418\u0449\u0443 \u0440\u0430\u0437\u0434\u0430\u0447\u0443\u2026",
     server: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u0432 TorrServer\u2026",
     files: "\u0416\u0434\u0443 \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432\u2026",
+    filesOf: (i, n) => `\u0416\u0434\u0443 \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432 (${i}/${n})\u2026`,
     none: "\u041F\u043E\u0434\u0445\u043E\u0434\u044F\u0449\u0435\u0439 \u0440\u0430\u0437\u0434\u0430\u0447\u0438 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
     noFile: "\u041D\u0443\u0436\u043D\u043E\u0439 \u0441\u0435\u0440\u0438\u0438 \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0435 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
     notYet: (n) => `\u0421\u0435\u0440\u0438\u044F ${n} \u0435\u0449\u0451 \u043D\u0435 \u043F\u043E\u044F\u0432\u0438\u043B\u0430\u0441\u044C \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0430\u0445`,
@@ -1166,8 +1204,12 @@ body:not(.no--animation) .lh-catalog .card--wide {
     unknown: "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0440\u0430\u0437\u0434\u0430\u0447\u0443"
   };
   var PlayError = class extends Error {
+    constructor(msg, fatal = false) {
+      super(msg);
+      this.fatal = fatal;
+    }
   };
-  var fail = (msg) => new PlayError(msg);
+  var fail = (msg, fatal) => new PlayError(msg, fatal);
   var ext = (path) => String(path || "").split(".").pop().toLowerCase();
   var isVideo = (f) => VIDEO.includes(ext(f.path));
   function genreIds(card) {
@@ -1235,6 +1277,24 @@ body:not(.no--animation) .lh-catalog .card--wide {
       out.push(s.result);
     }
     return out;
+  }
+  async function tryCandidates(candidates2, attempt, { cancelled = () => false, onMiss = () => {
+  } } = {}) {
+    let prevSeen = false;
+    for (let i = 0; i < (candidates2 || []).length; i++) {
+      let outcome;
+      try {
+        outcome = await attempt(candidates2[i], i);
+      } catch (err) {
+        if (cancelled() || !(err instanceof PlayError) || err.fatal) throw err;
+        outcome = "nofile";
+      }
+      if (outcome === "played" || outcome === "cancelled") return outcome;
+      if (cancelled()) return "cancelled";
+      if (outcome === "nofile-prev") prevSeen = true;
+      onMiss();
+    }
+    return prevSeen ? "nofile-prev" : "nofile";
   }
   function previousEpisodeCtx(ctx) {
     if (!ctx || ctx.kind === "movie" || !(ctx.episode > 1)) return null;
@@ -1316,7 +1376,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   }
   var altCache = /* @__PURE__ */ new Map();
   function altTitles(kind, id) {
-    if (id == null) return Promise.resolve([]);
+    if (id == null) return Promise.resolve(null);
     const key = (kind === "movie" ? "movie/" : "tv/") + id;
     if (altCache.has(key)) return Promise.resolve(altCache.get(key));
     const req = new Promise((resolve, reject) => {
@@ -1324,11 +1384,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
     });
     return withTimeout(req, ALT_TIMEOUT_MS, MSG.parser).then(
       (json) => {
-        const list = latinAltTitles(json);
-        altCache.set(key, list);
-        return list;
+        const alts = { latin: latinAltTitles(json), cyrillic: cyrillicAltTitles(json) };
+        altCache.set(key, alts);
+        return alts;
       },
-      () => []
+      () => null
     );
   }
   var resultsCache = /* @__PURE__ */ new Map();
@@ -1336,27 +1396,32 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const key = [movie.id, ctx.kind, ctx.season].join(":");
     const hit = resultsCache.get(key);
     if (hit && Date.now() - hit.at < RESULTS_TTL_MS) return hit.value;
+    const cancelled = () => !!(job && job.cancelled);
     const original = movie.original_title || movie.original_name || "";
-    let alts = ctx.kind === "anime" || !isLatinOrCyrillic(original) ? await altTitles(ctx.kind, movie.id) : null;
-    let titles = queryTitles(movie, alts || []);
+    const titlesOf = (alts2) => queryTitles(movie, alts2 && alts2.latin || [], { kind: ctx.kind, cyrillic: alts2 && alts2.cyrillic });
+    let alts = ctx.kind === "anime" || !isLatinOrCyrillic(original) ? await altTitles(ctx.kind, movie.id) : void 0;
+    let titles = titlesOf(alts);
     const params = firstQuery(movie, ctx, storageField("parse_lang"), titles);
-    const first = await searchOnce(params, job);
-    const firstDone = Date.now();
-    let second = [];
-    if (!(job && job.cancelled) && needSecond(ctx.kind, first.length)) {
-      if (!alts) {
-        alts = await altTitles(ctx.kind, movie.id);
-        titles = { ...queryTitles(movie, alts), title: titles.title, original: titles.original };
-      }
-      const q2 = secondQuery(movie, ctx, titles);
-      if (q2) {
-        const wait = QUERY_GAP_MS - (Date.now() - firstDone);
-        if (wait > 0) await sleep(wait);
-        if (!(job && job.cancelled)) second = await searchOnce(q2, job).catch(() => []);
-      }
+    const lists = [await searchOnce(params, job)];
+    let lastDone = Date.now();
+    let failed = false;
+    if (!cancelled() && lists[0].length < FEW_RESULTS && alts === void 0) {
+      alts = await altTitles(ctx.kind, movie.id);
+      titles = { ...titlesOf(alts), title: titles.title, original: titles.original };
     }
-    const value = { results: mergeResults(first, second), names: titles.names, params };
-    if (!(job && job.cancelled)) resultsCache.set(key, { at: Date.now(), value });
+    for (const q of cancelled() ? [] : followUpQueries(movie, ctx, titles, lists[0].length)) {
+      const wait = QUERY_GAP_MS - (Date.now() - lastDone);
+      if (wait > 0) await sleep(wait);
+      if (cancelled()) break;
+      try {
+        lists.push(await searchOnce(q, job));
+      } catch (e) {
+        failed = true;
+      }
+      lastDone = Date.now();
+    }
+    const value = { results: mergeResults(...lists), names: titles.names, params };
+    if (!cancelled() && !failed) resultsCache.set(key, { at: Date.now(), value });
     return value;
   }
   function addTorrent(result, movie) {
@@ -1370,7 +1435,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
           data: { lampa: true, movie }
         },
         (json) => json && json.hash ? resolve(json.hash) : reject(fail(MSG.torrserver)),
-        () => reject(fail(MSG.torrserver))
+        () => reject(fail(MSG.torrserver, true))
       );
     });
     return withTimeout(req, HASH_TIMEOUT_MS, MSG.torrserver);
@@ -1512,9 +1577,9 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }, text);
     return job;
   }
-  async function playFiles(job, card, movie, ctx, maxTries) {
+  async function playFiles(job, card, movie, ctx, maxTries, filesText = MSG.files) {
     const L = lampa();
-    L.Loading.setText(MSG.files);
+    L.Loading.setText(filesText);
     const files = await pollFiles(job.hash, job, maxTries);
     if (job.cancelled || !files) return "cancelled";
     const playlist = buildPlaylist(files, movie, job.hash);
@@ -1565,34 +1630,34 @@ body:not(.no--animation) .lh-catalog .card--wide {
         L.Noty.show(MSG.none);
         return openNativeList(params);
       }
-      if (!L.Torserver.url()) throw fail(MSG.noServer);
-      let prevSeen = false;
-      for (let i = 0; i < candidates2.length; i++) {
-        const cand = candidates2[i];
-        L.Loading.setText(i === 0 ? MSG.server : MSG.retry(i + 1, candidates2.length));
-        let outcome;
-        try {
-          const hash = await addTorrent(cand, movie);
-          job.hash = hash;
-          if (job.cancelled) return dropUnlessPreloaded(hash);
-          outcome = await playFiles(
-            job,
-            card,
-            movie,
-            { ...ctx, titleHasSeason: titleHasSeason(cand.Title) },
-            i === 0 ? FILES_TRIES : FILES_TRIES_EXTRA
-          );
-        } catch (err) {
-          if (i === 0 || job.cancelled || !(err instanceof PlayError)) throw err;
-          outcome = "nofile";
+      if (!L.Torserver.url()) throw fail(MSG.noServer, true);
+      const n = candidates2.length;
+      const outcome = await tryCandidates(candidates2, async (cand, i) => {
+        L.Loading.setText(i === 0 ? MSG.server : MSG.retry(i + 1, n));
+        const hash = await addTorrent(cand, movie);
+        job.hash = hash;
+        if (job.cancelled) {
+          dropUnlessPreloaded(hash);
+          return "cancelled";
         }
-        if (outcome === "played" || outcome === "cancelled" || job.cancelled) return;
-        if (outcome === "nofile-prev") prevSeen = true;
-        dropUnlessPreloaded(job.hash);
-        job.hash = null;
-      }
+        return playFiles(
+          job,
+          card,
+          movie,
+          { ...ctx, titleHasSeason: titleHasSeason(cand.Title) },
+          i === 0 ? FILES_TRIES : FILES_TRIES_EXTRA,
+          i === 0 ? MSG.files : MSG.filesOf(i + 1, n)
+        );
+      }, {
+        cancelled: () => job.cancelled,
+        onMiss: () => {
+          dropUnlessPreloaded(job.hash);
+          job.hash = null;
+        }
+      });
+      if (outcome === "played" || outcome === "cancelled" || job.cancelled) return;
       finish();
-      L.Noty.show(prevSeen ? MSG.notYet(ctx.episode) : MSG.noFile);
+      L.Noty.show(outcome === "nofile-prev" ? MSG.notYet(ctx.episode) : MSG.noFile);
       return openNativeList(params);
     } catch (err) {
       if (job.cancelled) return;
@@ -1611,7 +1676,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     });
     job.hash = hash;
     try {
-      if (!L.Torserver.url()) throw fail(MSG.noServer);
+      if (!L.Torserver.url()) throw fail(MSG.noServer, true);
       const kind = ctx && ctx.kind || detectKind(card);
       let movie = normalizeTitles(card);
       if (!movie.img && movie.poster_path) movie = { ...movie, img: L.Api.img(movie.poster_path) };
@@ -2304,8 +2369,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
     return cached.filter((e) => e && e.hash && e.card && e.key && onServer.has(e.hash) && !marked.has(e.hash)).map((e) => ({ ...e, server: onServer.get(e.hash) }));
   }
   function findExisting(entries, key, hash) {
-    const same = (entries || []).filter((e) => e && e.key === key);
-    return same.find((e) => e.hash === hash) || same[0] || null;
+    const same2 = (entries || []).filter((e) => e && e.key === key);
+    return same2.find((e) => e.hash === hash) || same2[0] || null;
   }
   var DlError = class extends Error {
   };

@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { selectTorrent, isRelevant, audioFromFfprobe, audioFromResult } from '../src/torrent-select.js';
+import { queryTitles, latinAltTitles, cyrillicAltTitles } from '../src/search-query.js';
+import { CHEAT_CARD, CHEAT_ALTS, FIRE_CARD, FIRE_ALTS, JJK_CARD } from './fixtures/tmdb-titles.js';
+
+const namesOf = (card, json) => queryTitles(card, latinAltTitles(json), { kind: 'anime', cyrillic: cyrillicAltTitles(json) }).names;
 
 const GiB = 1024 ** 3;
 const item = (Title, Seeders = 20, extra = {}) => ({ Title, Seeders, Size: 2 * GiB, MagnetUri: 'magnet:?xt=' + Title, ...extra });
@@ -8,7 +12,7 @@ const find = (res, title) => res.scored.find((s) => s.result.Title === title);
 const audio = (language, title) => ({ codec_type: 'audio', tags: { language, title } });
 
 // TMDB tv 313346 (real jac.red titles, 2026-11-15).
-const CHEAT = ['Изгнанный читер-чародей', 'Chii Fuyo', 'Cheat Fuyo', 'The Laid Off Cheat Granting Mage Enjoys a Second Life'];
+const CHEAT = namesOf(CHEAT_CARD, CHEAT_ALTS);
 const cheatCtx = { kind: 'anime', season: 1, episode: 1, absolute: 1, names: CHEAT };
 const NDA_BIG = 'Изгнанный читер-чародей наслаждается беззаботной второй жизнью / Tsuihou Sareta Cheat Fuyo Majutsushi wa Kimama na Second Life o (wo) Ouka Suru [TV] [01-06 из XX] [RUS(int), ENG, JAP+Sub] [2026, Фэнтези, WEB-DL] [1080p]';
 const NDA_DB = 'Изгнанный читер-чародей наслаждается беззаботной второй жизнью (1-6 серии из 12) / Chii Fuyo / 2026 / ДБ (NDA Studio), СТ / HEVC / WEBRip (1080p)';
@@ -54,7 +58,7 @@ test('test_anime_studio_markers_count_as_russian', () => {
 });
 
 // TMDB tv 320909 «Свадьба светлячков» (real jac.red titles, 2026-11-15).
-const FIRE = ['Свадьба светлячков', 'Hotaru no Yomeiri', 'Firefly Wedding'];
+const FIRE = namesOf(FIRE_CARD, FIRE_ALTS);
 const fireCtx = { kind: 'anime', season: 1, episode: 2, absolute: 2, names: FIRE };
 const EP2 = 'Свадьба светлячков / Hotaru no Yomeiri — Серия 2';
 const PACK = 'Свадьба светлячков / Hotaru no Yomeiri / 2026 / [WEB-DL 1080p][HEVC][1-5]';
@@ -122,4 +126,29 @@ test('test_ffprobe_decides_unmarked_titles', () => {
   // Movies: ffprobe Russian accepts an unmarked title, all-foreign audio rejects it.
   assert.strictEqual(selectTorrent([item('Film.2026.1080p', 20, { ffprobe: [audio('rus')] })], { kind: 'movie' }).scored[0].rejected, null);
   assert.strictEqual(selectTorrent([item('Film.2026.1080p', 20, { ffprobe: [audio('eng')] })], { kind: 'movie' }).scored[0].rejected, 'no-russian');
+});
+
+test('test_relevance_names_include_short_cyrillic_heads', () => {
+  const t = 'Изгнанный читер-чародей [01-06 из 12] ДБ AniLibria';
+  assert.ok(CHEAT.includes('Изгнанный читер-чародей'));
+  assert.strictEqual(selectTorrent([item(t)], cheatCtx).scored[0].rejected, null);
+});
+
+test('test_anime_without_alternative_titles_skips_relevance', () => {
+  const names = queryTitles(JJK_CARD, [], { kind: 'anime' }).names;
+  assert.deepStrictEqual(names, []);
+  const ctx = { kind: 'anime', season: 1, episode: 3, absolute: 3, names };
+  assert.strictEqual(selectTorrent([item('Jujutsu Kaisen [01-24] AniLibria')], ctx).scored[0].rejected, null);
+});
+
+test('test_subtitle_ext_is_not_russian_audio', () => {
+  const anime = { kind: 'anime', season: 1, episode: 1, absolute: 1, names: ['Frieren'] };
+  assert.strictEqual(selectTorrent([item('Frieren [TV] [01-28 из 28] [JAP, Sub RUS(ext)]')], anime).scored[0].rejected, 'no-russian');
+  assert.strictEqual(selectTorrent([item('Film / Film (2020) BDRip 1080p | Sub Rus(ext)')], { kind: 'movie' }).scored[0].rejected, 'no-russian');
+  assert.strictEqual(selectTorrent([item('Frieren [TV] [01-28 из 28] [RUS(ext), JAP+Sub]')], anime).scored[0].rejected, null);
+});
+
+test('test_raw_rejection_is_anime_only', () => {
+  const movie = 'Сырое / Raw / Grave (2016) BDRip 1080p | Дубляж';
+  assert.strictEqual(selectTorrent([item(movie)], { kind: 'movie', names: ['Сырое', 'Grave'] }).scored[0].rejected, null);
 });

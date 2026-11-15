@@ -3,6 +3,8 @@
 
 const MIN_TITLE = 4;
 const MAX_TITLE = 60;
+// Two leading words of a long name count as a name when this long.
+const MIN_TWO_WORDS = 12;
 // Titles longer than this are cut before the subtitle: trackers name a release by
 // the part before the colon («Изгнанный читер-чародей»), not by 228 characters.
 export const LONG_TITLE = 40;
@@ -40,51 +42,88 @@ export function shortTitle(name) {
   return s;
 }
 
-// Title as sent to the parser: long ones shortened, non-Latin/Cyrillic ones dropped ('').
-export function queryTitle(name) {
+// Title as sent to the parser; non-Latin/Cyrillic ones dropped (''). Movies go
+// whole (full title + year is precise; a cut title finds sequels); tv/anime
+// titles longer than LONG_TITLE are cut before the subtitle.
+export function queryTitle(name, kind) {
   const s = String(name || '').trim();
   if (!isLatinOrCyrillic(s)) return '';
+  if (kind === 'movie') return s;
   return s.length > LONG_TITLE ? shortTitle(s) : s;
+}
+
+function altList(json) {
+  return (json && (json.results || json.titles)) || [];
+}
+
+function uniqueShort(titles) {
+  const out = [];
+  const seen = new Set();
+  titles.forEach((title) => {
+    const s = shortTitle(title);
+    const key = s.toLowerCase();
+    if (s.length >= MIN_TITLE && !seen.has(key)) {
+      seen.add(key);
+      out.push(s);
+    }
+  });
+  return out;
 }
 
 // TMDB alternative_titles ({results} for tv, {titles} for movies) -> Latin titles,
 // JP entries first, then US; each shortened, at least 4 characters, no duplicates.
 export function latinAltTitles(json) {
-  const list = (json && (json.results || json.titles)) || [];
-  const rank = (c) => (c === 'JP' ? 0 : c === 'US' ? 1 : 2);
-  const out = [];
-  const seen = new Set();
-  list
+  const rank = (c) => (c === 'JP' ? 0 : 1);
+  return uniqueShort(altList(json)
     .filter((t) => t && (t.iso_3166_1 === 'JP' || t.iso_3166_1 === 'US') && isLatin(t.title))
     .sort((a, b) => rank(a.iso_3166_1) - rank(b.iso_3166_1))
-    .forEach((t) => {
-      const s = shortTitle(t.title);
-      const key = s.toLowerCase();
-      if (s.length >= MIN_TITLE && !seen.has(key)) {
-        seen.add(key);
-        out.push(s);
-      }
-    });
+    .map((t) => t.title));
+}
+
+// RU/UA alternative titles in Cyrillic: relevance names only, never queries.
+export function cyrillicAltTitles(json) {
+  return uniqueShort(altList(json)
+    .filter((t) => t && (t.iso_3166_1 === 'RU' || t.iso_3166_1 === 'UA') && hasCyrillic(t.title) && isLatinOrCyrillic(t.title))
+    .map((t) => t.title));
+}
+
+// Forms of one name a release title may carry: the name before the subtitle
+// (no length cap), the 60-char short form and, for a long name, its first two
+// words («Изгнанный читер-чародей»).
+export function nameForms(name) {
+  const s = String(name || '').trim();
+  if (!s || !isLatinOrCyrillic(s)) return [];
+  const cuts = [':', ' — ', '('].map((c) => s.indexOf(c)).filter((i) => i >= 0);
+  const head = cuts.length ? s.slice(0, Math.min(...cuts)).trim() : s;
+  const out = [head.length >= MIN_TITLE ? head : s, shortTitle(s)];
+  if (s.length > LONG_TITLE) {
+    const two = s.split(/\s+/).slice(0, 2).join(' ').replace(/[:,.(—–~]+$/, '');
+    if (two.length >= MIN_TWO_WORDS) out.push(two);
+  }
   return out;
 }
 
 // What the plan needs to know about a card: the RU and original titles for the
-// queries, the Latin alternative title for the second one, and all names that
-// a relevant release title must contain one of.
-// card: {title|name, original_title|original_name}; alts: latinAltTitles() output.
-export function queryTitles(card, alts = []) {
-  const ru = queryTitle(card.title || card.name);
+// queries, the Latin alternative title, the short RU fallback, and the names a
+// relevant release title must contain one of (broader than the queries).
+// alts: latinAltTitles(); opts.cyrillic: cyrillicAltTitles(); opts.kind.
+// Anime without a Latin name (no alternative titles): names [] = no relevance check.
+export function queryTitles(card, alts = [], opts = {}) {
+  const kind = opts.kind;
+  const rawRu = card.title || card.name || '';
   const rawOriginal = card.original_title || card.original_name || '';
-  const original = queryTitle(rawOriginal);
+  const ru = queryTitle(rawRu, kind);
+  const original = queryTitle(rawOriginal, kind);
   const alt = alts[0] || '';
   const title = ru || alt || original;
-  const names = [];
+  const short = ru ? shortTitle(ru) : '';
+  let names = [];
   const add = (n) => {
-    const s = shortTitle(n);
-    if (s && isLatinOrCyrillic(s) && !names.some((x) => x.toLowerCase() === s.toLowerCase())) names.push(s);
+    if (n && !names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
   };
-  [card.title || card.name, rawOriginal, ...alts].forEach(add);
-  return { title, original: original || title, alt, names };
+  [rawRu, rawOriginal, ...alts, ...(opts.cyrillic || [])].forEach((n) => nameForms(n).forEach(add));
+  if (kind === 'anime' && !names.some(isLatin)) names = [];
+  return { title, original: original || title, alt, short: short !== title ? short : '', names };
 }
 
 // Mirrors Lampa's components/full/start/torrents.js, with the titles given.
@@ -120,17 +159,35 @@ export function firstQuery(card, ctx, parseLang, t) {
   return searchParamsFor(movie, ctx, parseLang, t.title, t.original);
 }
 
+const same = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+
 // Second query, by the Latin alternative title; null when there is none or it
 // would repeat the first one.
 export function secondQuery(card, ctx, t) {
   if (!t.alt) return null;
-  const same = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
   if (same(t.alt, t.title) || same(t.alt, t.original)) return null;
   const movie = withTitles(card, t.title, t.alt);
   return searchParamsFor(movie, ctx, 'df', t.title, t.alt);
 }
 
+// Fallback by the short RU title (a movie or a tv title not cut for Q1); null
+// when it is the same as the first query's title.
+export function shortQuery(card, ctx, t) {
+  if (!t.short || same(t.short, t.title)) return null;
+  const movie = withTitles(card, t.short, t.short);
+  return searchParamsFor(movie, ctx, 'lg', t.short, t.short);
+}
+
 export const needSecond = (kind, count) => kind === 'anime' || count < FEW_RESULTS;
+
+// Queries after the first one, in order (at most two): the short RU title when
+// the first query found little, then the Latin alternative title (anime, or little found).
+export function followUpQueries(card, ctx, t, firstCount) {
+  const out = [];
+  if (firstCount < FEW_RESULTS) out.push(shortQuery(card, ctx, t));
+  if (needSecond(ctx.kind, firstCount)) out.push(secondQuery(card, ctx, t));
+  return out.filter(Boolean);
+}
 
 // Union of result lists: deduped by MagnetUri||Link, then by Title.
 export function mergeResults(...lists) {

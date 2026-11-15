@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import {
-  shortTitle, isLatinOrCyrillic, isLatin, queryTitle, latinAltTitles, queryTitles, firstQuery, secondQuery, needSecond, mergeResults,
+  shortTitle, isLatinOrCyrillic, isLatin, queryTitle, latinAltTitles, cyrillicAltTitles, queryTitles, firstQuery, secondQuery, needSecond,
+  mergeResults, followUpQueries,
 } from '../src/search-query.js';
+import { CHEAT_CARD, CHEAT_ALTS as REAL_CHEAT_ALTS } from './fixtures/tmdb-titles.js';
 
 const CHEAT_RU = 'Изгнанный читер-чародей наслаждается беззаботной второй жизнью: Я могу накладывать «очки усиления» не только на оружие, но и на что угодно, в любой момент отменяя эффект по собственной воле, а с теми, кто остался, всё нормально?';
 const CHEAT_JP = '追放されたチート付与魔術師は気ままなセカンドライフを謳歌する。 ～俺は武器だけじゃなく～';
@@ -102,4 +104,42 @@ test('test_merge_results_dedupes_by_link_then_title', () => {
   const a = [{ Title: 'A', MagnetUri: 'm1' }, { Title: 'B', Link: 'l2' }];
   const b = [{ Title: 'A again', MagnetUri: 'm1' }, { Title: 'b', MagnetUri: 'm3' }, { Title: 'C', MagnetUri: 'm4' }];
   assert.deepStrictEqual(mergeResults(a, b, null).map((r) => r.Title), ['A', 'B', 'C']);
+});
+
+test('test_movie_titles_stay_whole', () => {
+  const lotr = { title: 'Властелин колец: Братство кольца', original_title: 'The Lord of the Rings: The Fellowship of the Ring', release_date: '2001-12-18' };
+  const t = queryTitles(lotr, [], { kind: 'movie' });
+  assert.strictEqual(t.original, 'The Lord of the Rings: The Fellowship of the Ring');
+  assert.strictEqual(t.title, 'Властелин колец: Братство кольца');
+  assert.strictEqual(firstQuery(lotr, { kind: 'movie' }, 'df_year', t).search, 'The Lord of the Rings: The Fellowship of the Ring 2001');
+  // Little found: the short RU title as a fallback, before any Latin alt.
+  const follow = followUpQueries(lotr, { kind: 'movie' }, t, 2);
+  assert.strictEqual(follow[0].search, 'Властелин колец');
+  assert.strictEqual(follow[0].movie.title, 'Властелин колец');
+  assert.deepStrictEqual(followUpQueries(lotr, { kind: 'movie' }, t, 40), []);
+});
+
+test('test_tv_title_over_40_chars_is_cut', () => {
+  const name = 'Ведьмак: Происхождение и легенды Континента'; // 43 chars
+  assert.strictEqual(name.length, 43);
+  const card = { name, original_name: 'The Witcher: Blood Origin', first_air_date: '2022-12-25' };
+  const t = queryTitles(card, [], { kind: 'tv' });
+  assert.strictEqual(t.title, 'Ведьмак');
+  assert.strictEqual(t.original, 'The Witcher: Blood Origin'); // 25 chars: whole
+  assert.strictEqual(t.short, '');
+  assert.deepStrictEqual(followUpQueries(card, { kind: 'tv', season: 1 }, t, 1), []);
+  // 40 chars or less: whole, with the short form as a fallback.
+  const shorter = { name: 'Звёздные войны: Андор', original_name: 'Andor', first_air_date: '2022-09-21' };
+  const s = queryTitles(shorter, [], { kind: 'tv' });
+  assert.strictEqual(s.title, 'Звёздные войны: Андор');
+  assert.strictEqual(followUpQueries(shorter, { kind: 'tv', season: 2 }, s, 0)[0].search, 'Звёздные войны S02');
+});
+
+test('test_anime_follow_ups_short_then_alt', () => {
+  const t = queryTitles(CHEAT_CARD, latinAltTitles(REAL_CHEAT_ALTS), { kind: 'anime', cyrillic: cyrillicAltTitles(REAL_CHEAT_ALTS) });
+  // Q1 already uses the short form: only the Latin alt follows.
+  const many = followUpQueries(CHEAT_CARD, { kind: 'anime', season: 1 }, t, 10);
+  assert.deepStrictEqual(many.map((q) => q.search), ['Chii Fuyo S01']);
+  assert.ok(t.names.includes('Изгнанный читер-чародей'));
+  assert.ok(t.names.includes('Изгнанный читер-чародей наслаждается беззаботной второй жизнью'));
 });

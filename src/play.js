@@ -6,7 +6,8 @@ import { selectTorrent, parseTitle } from './torrent-select.js';
 import { episodeStatus, nextEpisode, absoluteEpisode, parseEpisode } from './episodes.js';
 import { loadTv, todayIso } from './tmdb.js';
 import {
-  isLatinOrCyrillic, latinAltTitles, queryTitles, firstQuery, secondQuery, needSecond, mergeResults, searchParamsFor,
+  isLatinOrCyrillic, latinAltTitles, cyrillicAltTitles, queryTitles, firstQuery, followUpQueries, mergeResults, searchParamsFor,
+  FEW_RESULTS,
 } from './search-query.js';
 
 const ANIMATION = 16;
@@ -36,6 +37,7 @@ const MSG = {
   search: 'Ищу раздачу…',
   server: 'Отправляю в TorrServer…',
   files: 'Жду список файлов…',
+  filesOf: (i, n) => `Жду список файлов (${i}/${n})…`,
   none: 'Подходящей раздачи не нашёл, выберите вручную',
   noFile: 'Нужной серии в раздаче не нашёл, выберите вручную',
   notYet: (n) => `Серия ${n} ещё не появилась в раздачах`,
@@ -48,8 +50,15 @@ const MSG = {
   unknown: 'Не удалось запустить раздачу',
 };
 
-class PlayError extends Error {}
-const fail = (msg) => new PlayError(msg);
+// fatal: TorrServer itself is missing or unreachable; any other PlayError about one
+// release (no hash in time, no file list) only makes «Играть» try the next one.
+export class PlayError extends Error {
+  constructor(msg, fatal = false) {
+    super(msg);
+    this.fatal = fatal;
+  }
+}
+const fail = (msg, fatal) => new PlayError(msg, fatal);
 
 // ---------- pure helpers ----------
 
@@ -140,6 +149,30 @@ export function nextCandidates(scored, max = MAX_CANDIDATES) {
     out.push(s.result);
   }
   return out;
+}
+
+// Ongoing shows: the best pack may stop one episode short, or the episode sits in
+// another release; a release may also never deliver its files. Tries each
+// candidate with attempt(cand, i) -> 'played' | 'cancelled' | 'nofile' | 'nofile-prev'.
+// A non-fatal PlayError is a miss like 'nofile'; after every miss onMiss() runs.
+// Fatal errors (TorrServer missing/unreachable) and foreign errors are rethrown.
+// Returns 'played', 'cancelled', 'nofile-prev' (a release held the episode before) or 'nofile'.
+export async function tryCandidates(candidates, attempt, { cancelled = () => false, onMiss = () => {} } = {}) {
+  let prevSeen = false;
+  for (let i = 0; i < (candidates || []).length; i++) {
+    let outcome;
+    try {
+      outcome = await attempt(candidates[i], i);
+    } catch (err) {
+      if (cancelled() || !(err instanceof PlayError) || err.fatal) throw err;
+      outcome = 'nofile';
+    }
+    if (outcome === 'played' || outcome === 'cancelled') return outcome;
+    if (cancelled()) return 'cancelled';
+    if (outcome === 'nofile-prev') prevSeen = true;
+    onMiss();
+  }
+  return prevSeen ? 'nofile-prev' : 'nofile';
 }
 
 // ctx of the episode before the target in the same season (null for a movie or
@@ -248,9 +281,10 @@ async function searchOnce(params, job) {
 
 const altCache = new Map();
 
-// Latin alternative titles of the card (TMDB alternative_titles), cached per card; [] on failure.
+// Alternative titles of the card (TMDB alternative_titles): {latin, cyrillic},
+// cached per card; null when TMDB did not answer.
 function altTitles(kind, id) {
-  if (id == null) return Promise.resolve([]);
+  if (id == null) return Promise.resolve(null);
   const key = (kind === 'movie' ? 'movie/' : 'tv/') + id;
   if (altCache.has(key)) return Promise.resolve(altCache.get(key));
   const req = new Promise((resolve, reject) => {
@@ -258,45 +292,52 @@ function altTitles(kind, id) {
   });
   return withTimeout(req, ALT_TIMEOUT_MS, MSG.parser).then(
     (json) => {
-      const list = latinAltTitles(json);
-      altCache.set(key, list);
-      return list;
+      const alts = { latin: latinAltTitles(json), cyrillic: cyrillicAltTitles(json) };
+      altCache.set(key, alts);
+      return alts;
     },
-    () => [],
+    () => null,
   );
 }
 
 const resultsCache = new Map();
 
-// Parser results for the target: Q1 by the (short) RU title; Q2 by the Latin
-// alternative title for anime or when Q1 found little, at least 1.2 s later.
+// Parser results for the target: Q1 by the RU title (tv/anime: cut when long);
+// then, at least 1.2 s apart, the short RU title when Q1 found little and the
+// Latin alternative title for anime or when Q1 found little.
 // -> {results, names (for selectTorrent's relevance check), params (Q1)}.
 export async function findReleases(movie, ctx, job) {
   const key = [movie.id, ctx.kind, ctx.season].join(':');
   const hit = resultsCache.get(key);
   if (hit && Date.now() - hit.at < RESULTS_TTL_MS) return hit.value;
 
+  const cancelled = () => !!(job && job.cancelled);
   const original = movie.original_title || movie.original_name || '';
-  let alts = ctx.kind === 'anime' || !isLatinOrCyrillic(original) ? await altTitles(ctx.kind, movie.id) : null;
-  let titles = queryTitles(movie, alts || []);
+  const titlesOf = (alts) => queryTitles(movie, (alts && alts.latin) || [], { kind: ctx.kind, cyrillic: alts && alts.cyrillic });
+  let alts = ctx.kind === 'anime' || !isLatinOrCyrillic(original) ? await altTitles(ctx.kind, movie.id) : undefined;
+  let titles = titlesOf(alts);
   const params = firstQuery(movie, ctx, storageField('parse_lang'), titles);
-  const first = await searchOnce(params, job);
-  const firstDone = Date.now();
-  let second = [];
-  if (!(job && job.cancelled) && needSecond(ctx.kind, first.length)) {
-    if (!alts) {
-      alts = await altTitles(ctx.kind, movie.id);
-      titles = { ...queryTitles(movie, alts), title: titles.title, original: titles.original };
-    }
-    const q2 = secondQuery(movie, ctx, titles);
-    if (q2) {
-      const wait = QUERY_GAP_MS - (Date.now() - firstDone);
-      if (wait > 0) await sleep(wait);
-      if (!(job && job.cancelled)) second = await searchOnce(q2, job).catch(() => []);
-    }
+  const lists = [await searchOnce(params, job)];
+  let lastDone = Date.now();
+  let failed = false;
+  if (!cancelled() && lists[0].length < FEW_RESULTS && alts === undefined) {
+    alts = await altTitles(ctx.kind, movie.id);
+    titles = { ...titlesOf(alts), title: titles.title, original: titles.original };
   }
-  const value = { results: mergeResults(first, second), names: titles.names, params };
-  if (!(job && job.cancelled)) resultsCache.set(key, { at: Date.now(), value });
+  for (const q of cancelled() ? [] : followUpQueries(movie, ctx, titles, lists[0].length)) {
+    const wait = QUERY_GAP_MS - (Date.now() - lastDone);
+    if (wait > 0) await sleep(wait);
+    if (cancelled()) break;
+    try {
+      lists.push(await searchOnce(q, job));
+    } catch (e) {
+      failed = true;
+    }
+    lastDone = Date.now();
+  }
+  const value = { results: mergeResults(...lists), names: titles.names, params };
+  // A failed follow-up or a cancelled run is not cached: the next press asks again.
+  if (!cancelled() && !failed) resultsCache.set(key, { at: Date.now(), value });
   return value;
 }
 
@@ -311,7 +352,7 @@ function addTorrent(result, movie) {
         data: { lampa: true, movie },
       },
       (json) => (json && json.hash ? resolve(json.hash) : reject(fail(MSG.torrserver))),
-      () => reject(fail(MSG.torrserver)),
+      () => reject(fail(MSG.torrserver, true)),
     );
   });
   return withTimeout(req, HASH_TIMEOUT_MS, MSG.torrserver);
@@ -488,9 +529,9 @@ function beginJob(text, onCancel) {
 
 // Waits for the torrent's files, picks the one to start (ctx.index wins when
 // known) and starts the player. Returns 'played', 'cancelled' or 'nofile'.
-async function playFiles(job, card, movie, ctx, maxTries) {
+async function playFiles(job, card, movie, ctx, maxTries, filesText = MSG.files) {
   const L = lampa();
-  L.Loading.setText(MSG.files);
+  L.Loading.setText(filesText);
   const files = await pollFiles(job.hash, job, maxTries);
   if (job.cancelled || !files) return 'cancelled';
 
@@ -552,32 +593,28 @@ export async function run(card) {
       return openNativeList(params);
     }
 
-    if (!L.Torserver.url()) throw fail(MSG.noServer);
-    // Ongoing shows: the best pack may stop one episode short, or the episode
-    // sits in another release. Try the next ones before giving up.
-    let prevSeen = false;
-    for (let i = 0; i < candidates.length; i++) {
-      const cand = candidates[i];
-      L.Loading.setText(i === 0 ? MSG.server : MSG.retry(i + 1, candidates.length));
-      let outcome;
-      try {
-        const hash = await addTorrent(cand, movie);
-        job.hash = hash;
-        if (job.cancelled) return dropUnlessPreloaded(hash);
-        outcome = await playFiles(job, card, movie, { ...ctx, titleHasSeason: titleHasSeason(cand.Title) },
-          i === 0 ? FILES_TRIES : FILES_TRIES_EXTRA);
-      } catch (err) {
-        // The first release's errors stop the run as before; a later one just did not work out.
-        if (i === 0 || job.cancelled || !(err instanceof PlayError)) throw err;
-        outcome = 'nofile';
+    if (!L.Torserver.url()) throw fail(MSG.noServer, true);
+    const n = candidates.length;
+    const outcome = await tryCandidates(candidates, async (cand, i) => {
+      L.Loading.setText(i === 0 ? MSG.server : MSG.retry(i + 1, n));
+      const hash = await addTorrent(cand, movie);
+      job.hash = hash;
+      if (job.cancelled) {
+        dropUnlessPreloaded(hash);
+        return 'cancelled';
       }
-      if (outcome === 'played' || outcome === 'cancelled' || job.cancelled) return;
-      if (outcome === 'nofile-prev') prevSeen = true;
-      dropUnlessPreloaded(job.hash);
-      job.hash = null;
-    }
+      return playFiles(job, card, movie, { ...ctx, titleHasSeason: titleHasSeason(cand.Title) },
+        i === 0 ? FILES_TRIES : FILES_TRIES_EXTRA, i === 0 ? MSG.files : MSG.filesOf(i + 1, n));
+    }, {
+      cancelled: () => job.cancelled,
+      onMiss: () => {
+        dropUnlessPreloaded(job.hash);
+        job.hash = null;
+      },
+    });
+    if (outcome === 'played' || outcome === 'cancelled' || job.cancelled) return;
     finish();
-    L.Noty.show(prevSeen ? MSG.notYet(ctx.episode) : MSG.noFile);
+    L.Noty.show(outcome === 'nofile-prev' ? MSG.notYet(ctx.episode) : MSG.noFile);
     return openNativeList(params);
   } catch (err) {
     if (job.cancelled) return;
@@ -598,7 +635,7 @@ export async function startFromHash(hash, card, ctx, title) {
   const job = beginJob(MSG.files, () => {});
   job.hash = hash;
   try {
-    if (!L.Torserver.url()) throw fail(MSG.noServer);
+    if (!L.Torserver.url()) throw fail(MSG.noServer, true);
     const kind = (ctx && ctx.kind) || detectKind(card);
     let movie = normalizeTitles(card);
     if (!movie.img && movie.poster_path) movie = { ...movie, img: L.Api.img(movie.poster_path) };

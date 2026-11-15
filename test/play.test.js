@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import {
   detectKind, pickFile, buildSearchParams, advanceWatched, timelineHashString, resumeTarget, normalizeTitles, titleHasSeason,
-  nextCandidates, previousEpisodeCtx,
+  nextCandidates, previousEpisodeCtx, tryCandidates, PlayError,
 } from '../src/play.js';
 
 const GiB = 1024 ** 3;
@@ -204,4 +204,42 @@ test('test_previous_episode_ctx', () => {
     { kind: 'anime', season: 1, episode: 11, absolute: 11 });
   assert.strictEqual(previousEpisodeCtx({ kind: 'tv', season: 1, episode: 1, absolute: 1 }), null);
   assert.strictEqual(previousEpisodeCtx({ kind: 'movie' }), null);
+});
+
+test('test_dead_first_release_does_not_end_the_run', async () => {
+  const misses = [];
+  const tried = [];
+  // First release never returns its file list (pollFiles -> noFiles after 20 × 2 s).
+  const outcome = await tryCandidates(['dead', 'good', 'third'], async (cand) => {
+    tried.push(cand);
+    if (cand === 'dead') throw new PlayError('TorrServer не получил список файлов');
+    return 'played';
+  }, { onMiss: () => misses.push(tried[tried.length - 1]) });
+  assert.strictEqual(outcome, 'played');
+  assert.deepStrictEqual(tried, ['dead', 'good']);
+  assert.deepStrictEqual(misses, ['dead']);
+});
+
+test('test_candidate_loop_outcomes', async () => {
+  // TorrServer unreachable is fatal on any candidate.
+  await assert.rejects(tryCandidates(['a', 'b'], async () => {
+    throw new PlayError('TorrServer недоступен', true);
+  }), (e) => e.fatal === true);
+  // Foreign errors are rethrown too.
+  await assert.rejects(tryCandidates(['a'], async () => {
+    throw new TypeError('bug');
+  }), TypeError);
+  // Every miss: 'nofile-prev' wins over 'nofile' at the end.
+  assert.strictEqual(await tryCandidates(['a', 'b'], async (c) => (c === 'a' ? 'nofile-prev' : 'nofile')), 'nofile-prev');
+  assert.strictEqual(await tryCandidates(['a'], async () => 'nofile'), 'nofile');
+  // Cancelled while a miss happens: stop.
+  let cancelled = false;
+  const tried = [];
+  const out = await tryCandidates(['a', 'b'], async (c) => {
+    tried.push(c);
+    cancelled = true;
+    return 'nofile';
+  }, { cancelled: () => cancelled });
+  assert.strictEqual(out, 'cancelled');
+  assert.deepStrictEqual(tried, ['a']);
 });
