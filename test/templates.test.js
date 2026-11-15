@@ -61,3 +61,11 @@ test('test_banner_overview_truncated_at_word_boundary', () => {
   assert.strictEqual(truncate('short text', 180), 'short text');
   assert.strictEqual(truncate('x'.repeat(180), 180), 'x'.repeat(180));
 });
+
+test('test_banner_text_is_raw_for_live_updates', async () => {
+  const { bannerText } = await import('../src/templates.js');
+  const raw = bannerText({ name: 'A & <B>', first_air_date: '2025-01-01', backdrop_path: '/b.jpg' }, { img });
+  assert.strictEqual(raw.title, 'A & <B>');
+  assert.strictEqual(raw.meta, '2025');
+  assert.strictEqual(raw.backdrop, 'https://img/w1280/b.jpg');
+});

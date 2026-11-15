@@ -64,16 +64,30 @@
   display: none;
 }
 
-/* Hero banner above the rows: backdrop, left/bottom shade, text bottom-left. */
+/* Sticky hero banner: a fixed slot above Main's scroll (the rows scroll under it).
+   The slot height includes its padding (Layer subtracts its bounding box). */
+.lh-home__hero {
+  height: 38vh;
+  padding: 0.5em 1.5em 0.5em 1.5em;
+}
 .lh-home .lh-banner {
   position: relative;
-  height: 45vh;
-  margin: 0 1.5em 1.5em 1.5em;
+  height: 100%;
   border-radius: 0.4em;
   overflow: hidden;
   background-color: #111;
+}
+/* Two backdrop layers crossfade when the banner follows the focused card. */
+.lh-home .lh-banner__bg {
+  position: absolute;
+  inset: 0;
   background-size: cover;
   background-position: center;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.lh-home .lh-banner__bg--on {
+  opacity: 1;
 }
 .lh-home .lh-banner__shade {
   position: absolute;
@@ -845,6 +859,22 @@
     if (!random) return cards[0];
     return cards[Math.floor(rnd() * Math.min(5, cards.length))];
   }
+  var realTimers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) };
+  function latestWins(apply, delay, timers = realTimers) {
+    let timer = null;
+    const push = (value) => {
+      if (timer !== null) timers.clear(timer);
+      timer = timers.set(() => {
+        timer = null;
+        apply(value);
+      }, delay);
+    };
+    push.cancel = () => {
+      if (timer !== null) timers.clear(timer);
+      timer = null;
+    };
+    return push;
+  }
 
   // src/tmdb.js
   var HISTORY_LIMIT = 20;
@@ -1547,7 +1577,9 @@
 
   // src/templates.js
   var BANNER = "lh_banner";
-  var BANNER_HTML = `<div class="lh-banner" style="background-image:url('{backdrop}')">
+  var BANNER_HTML = `<div class="lh-banner">
+  <div class="lh-banner__bg lh-banner__bg--on" style="background-image:url('{backdrop}')"></div>
+  <div class="lh-banner__bg"></div>
   <div class="lh-banner__shade"></div>
   <div class="lh-banner__body">
     <div class="lh-banner__title">{title}</div>
@@ -1582,17 +1614,25 @@
     const cut = space > 0 ? head.slice(0, space) : str.slice(0, max - 1);
     return cut.replace(/[\s,.;:—-]+$/, "") + "\u2026";
   }
-  function bannerVars(card, { img, genres = {} }) {
+  function bannerText(card, { img, genres = {} }) {
     const date = card.release_date || card.first_air_date || "";
     const genre = (card.genre_ids || []).map((id) => genres[id]).find(Boolean);
     const rating = Number(card.vote_average) > 0 ? "\u2605 " + Number(card.vote_average).toFixed(1) : "";
-    const meta = [date.slice(0, 4), genre, rating].filter(Boolean).join(" \xB7 ");
     const path = card.backdrop_path || card.poster_path;
     return {
-      title: esc(card.title || card.name),
-      meta: esc(meta),
-      overview: esc(truncate(card.overview, 180)),
-      backdrop: path ? esc(img(path, "w1280")) : ""
+      title: String(card.title || card.name || ""),
+      meta: [date.slice(0, 4), genre, rating].filter(Boolean).join(" \xB7 "),
+      overview: truncate(card.overview, 180),
+      backdrop: path ? img(path, "w1280") : ""
+    };
+  }
+  function bannerVars(card, opts) {
+    const raw = bannerText(card, opts);
+    return {
+      title: esc(raw.title),
+      meta: esc(raw.meta),
+      overview: esc(raw.overview),
+      backdrop: raw.backdrop ? esc(raw.backdrop) : ""
     };
   }
   function register2() {
@@ -1613,21 +1653,52 @@
   }
   function createBanner(comp, card) {
     const L = lampa();
-    const vars = bannerVars(card, {
+    const opts = {
       img: L.Api.img,
       genres: genreMap(L.Api.sources.tmdb.genres, L.Lang.translate)
-    });
-    const html = L.Template.get(BANNER, vars);
+    };
+    const html = L.Template.get(BANNER, bannerVars(card, opts));
     const el = html[0];
+    const bgs = el.querySelectorAll(".lh-banner__bg");
+    const field = (name) => el.querySelector(".lh-banner__" + name);
+    let shown = card;
+    let front = 0;
+    let token = 0;
     let last = false;
+    let destroyed = false;
+    function swapBackdrop(url) {
+      const my = ++token;
+      const apply = () => {
+        if (destroyed || my !== token) return;
+        const next = 1 - front;
+        bgs[next].style.backgroundImage = url ? `url('${url.replace(/'/g, "%27")}')` : "none";
+        bgs[next].classList.add("lh-banner__bg--on");
+        bgs[front].classList.remove("lh-banner__bg--on");
+        front = next;
+      };
+      if (!url) return apply();
+      const img = new Image();
+      img.onload = apply;
+      img.onerror = apply;
+      img.src = url;
+    }
+    function show(next) {
+      if (destroyed || !next || next === shown) return;
+      shown = next;
+      const raw = bannerText(next, opts);
+      field("title").textContent = raw.title;
+      field("meta").textContent = raw.meta;
+      field("overview").textContent = raw.overview;
+      swapBackdrop(raw.backdrop);
+    }
     html.find(".selector").on("hover:focus", function() {
       last = this;
-      comp.scroll.update(el);
-      L.Background.change(L.Utils.cardImgBackground(card));
+      L.Background.change(L.Utils.cardImgBackground(shown));
     });
-    html.find(".lh-banner__play").on("hover:enter", () => run(card));
-    html.find(".lh-banner__more").on("hover:enter", () => L.Router.call("full", card));
+    html.find(".lh-banner__play").on("hover:enter", () => run(shown));
+    html.find(".lh-banner__more").on("hover:enter", () => L.Router.call("full", shown));
     return {
+      follow: latestWins(show, 250),
       toggle() {
         L.Controller.add("lh_banner", {
           link: this,
@@ -1642,14 +1713,18 @@
           right: () => {
             if (Navigator.canmove("right")) Navigator.move("right");
           },
-          up: () => comp.emit("up"),
-          down: () => comp.emit("down"),
+          up: () => L.Controller.toggle("head"),
+          down: () => comp.lhRows(),
           back: () => comp.emit("back")
         });
         L.Controller.toggle("lh_banner");
       },
       render: (js) => js ? el : html,
-      destroy: () => html.remove()
+      destroy() {
+        destroyed = true;
+        this.follow.cancel();
+        html.remove();
+      }
     };
   }
   function buildRows(loaded) {
@@ -1674,27 +1749,79 @@
     comp[MARKER] = true;
     comp.use({
       onCreate() {
-        this.render(true).classList.add("lh-home");
+        const root = this.render(true);
+        root.classList.add("lh-home");
+        let hero = null;
+        const dropHero = () => {
+          if (hero) hero.remove();
+          hero = null;
+          this.scroll.minus();
+        };
+        if (storageField("lh_banner") !== false) {
+          hero = document.createElement("div");
+          hero.className = "lh-home__hero";
+          root.prepend(hero);
+          this.scroll.minus(hero);
+        }
+        this.lhRows = () => {
+          if (!this.items.length) return;
+          this.lhOnBanner = false;
+          this.active = 0;
+          this.items[0].toggle();
+        };
         const today = todayIso();
         Promise.all(ROWS.map((key) => loadRow(key, today))).then((loaded) => {
           if (this.destroyed) return;
           const rows = buildRows(loaded);
-          if (!rows.length) return this.empty();
-          const bcard = storageField("lh_banner") === false ? null : bannerCard(rows);
-          const banner = bcard && createBanner(this, bcard);
-          if (banner) {
-            this.render(true).querySelector(".scroll__body").prepend(banner.render(true));
-            this.items.push(banner);
+          if (!rows.length) {
+            dropHero();
+            return this.empty();
           }
+          const bcard = hero && bannerCard(rows);
+          if (bcard) {
+            this.lhBanner = createBanner(this, bcard);
+            this.lhOnBanner = true;
+            hero.append(this.lhBanner.render(true));
+          } else dropHero();
           this.build(rows);
         }).catch((e) => {
           if (!this.destroyed) fallbackToNative(e);
         });
       },
+      // Main re-enters the activity via the content controller: resume where focus was.
+      onController(controller) {
+        const rowsToggle = controller.toggle;
+        controller.toggle = () => {
+          if (this.lhBanner && this.lhOnBanner && L.Platform.screen("tv")) this.lhBanner.toggle();
+          else rowsToggle();
+        };
+      },
+      // Replaces Main's onUp: from the first row go to the banner instead of the head.
+      onlyUp() {
+        if (this.active > 0) {
+          this.active--;
+          this.items[this.active].toggle();
+        } else if (this.lhBanner) {
+          this.active = 0;
+          this.lhOnBanner = true;
+          this.lhBanner.toggle();
+        } else {
+          this.active = 0;
+          L.Controller.toggle("head");
+        }
+      },
+      // Replaces Main's onDown (also the wheel): from the banner into the first row.
+      onlyDown() {
+        if (this.lhOnBanner) return this.lhRows();
+        if (!this.items.length) return;
+        this.active = Math.min(this.active + 1, this.items.length - 1);
+        this.items[this.active].toggle();
+      },
       onNext(resolve, reject) {
         reject.call(this);
       },
       onDestroy() {
+        if (this.lhBanner) this.lhBanner.destroy();
         this.destroyed = true;
       },
       onInstance(item, data) {
@@ -1718,6 +1845,8 @@
                 this.destroyed = true;
               },
               onFocus() {
+                comp.lhOnBanner = false;
+                if (comp.lhBanner) comp.lhBanner.follow(cardData);
                 L.Background.change(L.Utils.cardImgBackground(cardData));
               }
             });

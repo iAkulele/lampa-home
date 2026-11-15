@@ -62,16 +62,30 @@
   display: none;
 }
 
-/* Hero banner above the rows: backdrop, left/bottom shade, text bottom-left. */
+/* Sticky hero banner: a fixed slot above Main's scroll (the rows scroll under it).
+   The slot height includes its padding (Layer subtracts its bounding box). */
+.lh-home__hero {
+  height: 38vh;
+  padding: 0.5em 1.5em 0.5em 1.5em;
+}
 .lh-home .lh-banner {
   position: relative;
-  height: 45vh;
-  margin: 0 1.5em 1.5em 1.5em;
+  height: 100%;
   border-radius: 0.4em;
   overflow: hidden;
   background-color: #111;
+}
+/* Two backdrop layers crossfade when the banner follows the focused card. */
+.lh-home .lh-banner__bg {
+  position: absolute;
+  inset: 0;
   background-size: cover;
   background-position: center;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.lh-home .lh-banner__bg--on {
+  opacity: 1;
 }
 .lh-home .lh-banner__shade {
   position: absolute;

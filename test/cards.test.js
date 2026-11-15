@@ -112,3 +112,40 @@ test('test_fill_pages_stops_when_done', async () => {
   await fillPages(async (p) => { calls.push(p); return { cards: [p], done: true }; });
   assert.deepStrictEqual(calls, [1]);
 });
+
+test('test_banner_follows_focus_debounced', async () => {
+  const { latestWins } = await import('../src/cards.js');
+  let now = 0;
+  let queue = [];
+  let seq = 0;
+  const timers = {
+    set: (fn, ms) => {
+      const id = ++seq;
+      queue.push({ id, fn, at: now + ms });
+      return id;
+    },
+    clear: (id) => {
+      queue = queue.filter((t) => t.id !== id);
+    },
+  };
+  const advance = (ms) => {
+    now += ms;
+    const due = queue.filter((t) => t.at <= now);
+    queue = queue.filter((t) => t.at > now);
+    due.forEach((t) => t.fn());
+  };
+  const shown = [];
+  const push = latestWins((card) => shown.push(card.id), 250, timers);
+  // Holding Right: a focus every 100 ms — nothing is applied until it settles.
+  [1, 2, 3, 4].forEach((id) => {
+    push({ id });
+    advance(100);
+  });
+  assert.deepStrictEqual(shown, []);
+  advance(150);
+  assert.deepStrictEqual(shown, [4]);
+  push({ id: 5 });
+  push.cancel();
+  advance(500);
+  assert.deepStrictEqual(shown, [4]);
+});

@@ -80,3 +80,22 @@ export function pickBannerCard(cards, random, rnd = Math.random) {
   if (!random) return cards[0];
   return cards[Math.floor(rnd() * Math.min(5, cards.length))];
 }
+
+// "Latest wins" debounce: of the values pushed within `delay` ms only the last one
+// reaches `apply`. push.cancel() drops a pending value. `timers` is injectable for tests.
+const realTimers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) };
+export function latestWins(apply, delay, timers = realTimers) {
+  let timer = null;
+  const push = (value) => {
+    if (timer !== null) timers.clear(timer);
+    timer = timers.set(() => {
+      timer = null;
+      apply(value);
+    }, delay);
+  };
+  push.cancel = () => {
+    if (timer !== null) timers.clear(timer);
+    timer = null;
+  };
+  return push;
+}

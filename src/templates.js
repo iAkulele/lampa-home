@@ -3,7 +3,10 @@ import { lampa } from './lampa.js';
 
 export const BANNER = 'lh_banner';
 
-const BANNER_HTML = `<div class="lh-banner" style="background-image:url('{backdrop}')">
+// Two backdrop layers: the hidden one takes the next image and fades in (no flash).
+const BANNER_HTML = `<div class="lh-banner">
+  <div class="lh-banner__bg lh-banner__bg--on" style="background-image:url('{backdrop}')"></div>
+  <div class="lh-banner__bg"></div>
   <div class="lh-banner__shade"></div>
   <div class="lh-banner__body">
     <div class="lh-banner__title">{title}</div>
@@ -57,19 +60,29 @@ export function truncate(text, max) {
   return cut.replace(/[\s,.;:—-]+$/, '') + '…';
 }
 
-// Vars for the banner template. `img(path, size)` is Lampa.Api.img;
-// `genres` is a genreMap() result.
-export function bannerVars(card, { img, genres = {} }) {
+// Raw (unescaped) banner fields of a card: for live updates via textContent.
+// `img(path, size)` is Lampa.Api.img; `genres` is a genreMap() result.
+export function bannerText(card, { img, genres = {} }) {
   const date = card.release_date || card.first_air_date || '';
   const genre = (card.genre_ids || []).map((id) => genres[id]).find(Boolean);
   const rating = Number(card.vote_average) > 0 ? '★ ' + Number(card.vote_average).toFixed(1) : '';
-  const meta = [date.slice(0, 4), genre, rating].filter(Boolean).join(' · ');
   const path = card.backdrop_path || card.poster_path;
   return {
-    title: esc(card.title || card.name),
-    meta: esc(meta),
-    overview: esc(truncate(card.overview, 180)),
-    backdrop: path ? esc(img(path, 'w1280')) : '',
+    title: String(card.title || card.name || ''),
+    meta: [date.slice(0, 4), genre, rating].filter(Boolean).join(' · '),
+    overview: truncate(card.overview, 180),
+    backdrop: path ? img(path, 'w1280') : '',
+  };
+}
+
+// Vars for the banner template: bannerText() escaped for Template.get.
+export function bannerVars(card, opts) {
+  const raw = bannerText(card, opts);
+  return {
+    title: esc(raw.title),
+    meta: esc(raw.meta),
+    overview: esc(raw.overview),
+    backdrop: raw.backdrop ? esc(raw.backdrop) : '',
   };
 }
 
