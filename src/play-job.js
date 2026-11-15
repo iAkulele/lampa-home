@@ -34,7 +34,9 @@ export function beginJob(text, onCancel) {
   // Still the running job (a cancelled or timed-out one may already be replaced).
   job.isCurrent = () => current === job;
   job.finish = () => {
-    if (job.timer) clearInterval(job.timer);
+    // Ends a file wait too (resolves null), so the run gets to its cleanup.
+    if (job.stopPoll) job.stopPoll();
+    else if (job.timer) clearInterval(job.timer);
     if (job.deadline) clearTimeout(job.deadline);
     if (current === job) current = null;
     if (job.loading) L.Loading.stop();

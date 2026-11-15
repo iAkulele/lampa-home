@@ -29,11 +29,18 @@ export function addTorrent(result, movie) {
       () => reject(fail(MSG.torrserver, true)),
     );
   });
-  return withTimeout(req, HASH_TIMEOUT_MS, MSG.torrserver);
+  // A hash that comes after the timeout belongs to nobody: drop it, or the
+  // torrent stays on TorrServer forever.
+  let late = false;
+  req.then((hash) => { if (late) dropUnlessPreloaded(hash); }, () => {});
+  return withTimeout(req, HASH_TIMEOUT_MS, MSG.torrserver).catch((err) => {
+    late = true;
+    throw err;
+  });
 }
 
 // Torserver.files() calls back only once file_stats exist; poll like Lampa does.
-// Resolves null when the job is cancelled.
+// Resolves null when the job is cancelled or finished (Back, the run cap).
 export function pollFiles(hash, job, maxTries = FILES_TRIES) {
   const L = lampa();
   return new Promise((resolve, reject) => {
@@ -48,9 +55,11 @@ export function pollFiles(hash, job, maxTries = FILES_TRIES) {
     const stop = (err, files) => {
       clearInterval(job.timer);
       job.timer = null;
+      job.stopPoll = null;
       if (err) reject(err);
       else resolve(files || null);
     };
+    job.stopPoll = () => stop(null);
     job.timer = setInterval(tick, FILES_EVERY_MS);
     tick();
   });
