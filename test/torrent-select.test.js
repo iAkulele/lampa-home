@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { parseTitle, selectTorrent } from '../src/torrent-select.js';
+import { parseTitle, selectTorrent, effectiveResolution } from '../src/torrent-select.js';
 
 const GiB = 1024 ** 3;
 const item = (Title, Seeders = 20, Size = 8 * GiB) => ({ Title, Seeders, Size, MagnetUri: 'magnet:?xt=' + Title });
@@ -39,7 +39,7 @@ test('test_rejects_oversize_movie', () => {
 });
 
 test('test_prefers_2160_over_1080_when_alive', () => {
-  const a = item('Film 2160p WEB-DL LostFilm', 20);
+  const a = item('Film 2160p WEB-DL LostFilm', 20, 20 * GiB);
   const b = item('Film 1080p WEB-DL LostFilm', 50);
   assert.strictEqual(selectTorrent([b, a], { kind: 'movie' }).chosen, a);
 });
@@ -82,6 +82,37 @@ test('test_smaller_size_tiebreak', () => {
   const big = item('Film 1080p RUS A', 20, 12 * GiB);
   const small = item('Film 1080p RUS B', 20, 8 * GiB);
   assert.strictEqual(selectTorrent([big, small], { kind: 'movie' }).chosen, small);
+});
+
+test('test_light_2160_movie_scores_as_1080', () => {
+  const thin4k = item('Film 2160p WEB-DL LostFilm', 60, 6.5 * GiB);
+  const fake4k = item('Film 2160p WEB-DL LostFilm', 60, 4 * GiB);
+  const fullhd = item('Film 1080p WEB-DL LostFilm', 20, 8 * GiB);
+  const real4k = item('Film 2160p WEB-DL LostFilm', 10, 16 * GiB);
+  assert.strictEqual(selectTorrent([thin4k, fullhd, real4k], { kind: 'movie' }).chosen, real4k);
+  // A 2160p under 6 GiB is 'thin': the 1080p beats it despite fewer seeders.
+  assert.strictEqual(selectTorrent([fake4k, fullhd], { kind: 'movie' }).chosen, fullhd);
+  // A 2160p between the floors is scored as a 1080p of the same size.
+  const r = selectTorrent([thin4k, fullhd], { kind: 'movie' });
+  assert.strictEqual(find(r, thin4k.Title).score - find(r, fullhd.Title).score > 0, true);
+});
+
+test('test_effective_resolution_floors_movies_only', () => {
+  const p = (t) => parseTitle(t);
+  assert.strictEqual(effectiveResolution(p('Film 2160p'), { Size: 20 * GiB }, { kind: 'movie' }), 2160);
+  assert.strictEqual(effectiveResolution(p('Film 2160p'), { Size: 10 * GiB }, { kind: 'movie' }), 1080);
+  assert.strictEqual(effectiveResolution(p('Film 2160p'), { Size: 4 * GiB }, { kind: 'movie' }), 'thin');
+  assert.strictEqual(effectiveResolution(p('Film 1080p'), { Size: 5 * GiB }, { kind: 'movie' }), 'thin');
+  assert.strictEqual(effectiveResolution(p('Film 1080p'), { Size: 6 * GiB }, { kind: 'movie' }), 1080);
+  assert.strictEqual(effectiveResolution(p('Film 1080p'), { Size: 0 }, { kind: 'movie' }), 1080);
+  assert.strictEqual(effectiveResolution(p('Show S01 2160p'), { Size: 10 * GiB }, { kind: 'tv' }), 2160);
+});
+
+test('test_thin_1080_loses_to_720_tie_but_not_rejected', () => {
+  const thin = item('Film 1080p WEB-DL LostFilm', 20, 3 * GiB);
+  const r = selectTorrent([thin], { kind: 'movie' });
+  assert.strictEqual(r.chosen, thin);
+  assert.strictEqual(find(r, thin.Title).rejected, null);
 });
 
 test('test_tv_requires_episode_present', () => {

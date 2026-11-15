@@ -67,17 +67,17 @@ test('test_picker_uses_season_map', () => {
     inProgress: { 39: 30 }, today: TODAY, seasonsCount: 4,
   });
   assert.deepStrictEqual(items[0], {
-    title: 'Продолжить: серия 3', subtitle: '#40 · E40', season: 3, episode: 3, absolute: 40, kind: 'continue', selected: true,
+    title: 'Продолжить: серия 3', subtitle: '', season: 3, episode: 3, absolute: 40, kind: 'continue', selected: true,
   });
   assert.strictEqual(items[1].kind, 'season');
   const list = items.filter((i) => i.kind === 'episode');
   assert.strictEqual(list.length, 13);
   assert.deepStrictEqual(list.slice(0, 3).map((i) => [i.title, i.subtitle, i.episode, i.absolute]), [
-    ['✓ Серия 1', '#38 · E38', 1, 38],
-    ['▶ 30% Серия 2', '#39 · E39', 2, 39],
-    ['Серия 3', '#40 · E40', 3, 40],
+    ['✓ Серия 1 (#38)', '', 1, 38],
+    ['▶ 30% Серия 2 (#39)', '', 2, 39],
+    ['Серия 3 (#40)', '', 3, 40],
   ]);
-  assert.strictEqual(list[12].subtitle, '#50 · E50');
+  assert.strictEqual(list[12].title, 'Серия 13 (#50)');
 
   // Season 4 is airing: 7 of its 13 aired (57 absolute).
   const s4 = pickerItems({ season: 4, target: null, episodes: mappedEpisodes(MAP, 4, tmdb, 57), today: TODAY, seasonsCount: 4 });

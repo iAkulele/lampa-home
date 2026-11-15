@@ -12,6 +12,12 @@ export const STORAGE_KEYS = {
   settings: 'lh_settings',
 };
 
+// Movies only: a 2160p release below its floor is scored as 1080p, a 1080p (or a
+// 2160p below the 1080 floor) as `thin`. Series packs vary too much in episode count.
+export const SIZE_FLOORS = {
+  movie: { 2160: 15 * 1024 ** 3, 1080: 6 * 1024 ** 3 },
+};
+
 export const LIMITS = {
   searchTimeoutMs: 12000,
   maxMovieBytes: 60 * 1024 ** 3,
@@ -76,7 +82,8 @@ export const HDR_MARKERS = 'hdr10|hdr\\b|\\bp8\\b|profile ?8';
 
 // Scoring weights (penalty-based, not lexicographic).
 export const SCORING = {
-  quality: { 2160: 100, 1080: 80, 720: 20, anime720: 60, 480: 10, unknown: 40 },
+  // thin: a movie release lighter than its resolution's floor (SIZE_FLOORS).
+  quality: { 2160: 100, 1080: 80, 720: 20, anime720: 60, 480: 10, unknown: 40, thin: 20 },
   voiceFirst: 40,
   voiceSecond: 30,
   voiceAnyRussian: 15,

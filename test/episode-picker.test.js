@@ -18,10 +18,10 @@ test('test_picker_marks_watched_and_selects_continue', () => {
     season: 1, target: { season: 1, episode: 3 }, episodes: EPISODES, watchedSet: new Set([1, 2]), today: TODAY, seasonsCount: 2,
   });
   assert.deepStrictEqual(items[0], {
-    title: 'Продолжить: серия 3', subtitle: 'Третья', season: 1, episode: 3, kind: 'continue', selected: true,
+    title: 'Продолжить: серия 3', subtitle: '', season: 1, episode: 3, kind: 'continue', selected: true,
   });
   assert.strictEqual(items[2].title, '✓ Серия 1 — Пилот');
-  assert.strictEqual(items[2].subtitle, '01.10.2026');
+  assert.strictEqual(items[2].subtitle, '');
   assert.strictEqual(items[2].kind, 'episode');
   assert.strictEqual(items[2].selected, false);
   assert.strictEqual(items[3].title, '✓ Серия 2 — Вторая');

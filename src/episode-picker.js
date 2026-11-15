@@ -55,10 +55,9 @@ export function inProgressEpisodes(season, numbers, view) {
   return out;
 }
 
-// A mapped episode (tracker season, ep.absolute set): «Серия 3», the absolute
-// number and the name in the subtitle («#40 · name»).
-const episodeTitle = (ep) => `Серия ${ep.episode_number}` + (ep.name && ep.absolute == null ? ` — ${ep.name}` : '');
-const mappedSubtitle = (ep) => [`#${ep.absolute}`, ep.name || formatDate(ep.air_date)].filter(Boolean).join(' · ');
+// Episode items carry no subtitle (user's choice): «Серия 3 — name»; a mapped
+// episode (tracker season, ep.absolute set) shows the absolute number instead.
+const episodeTitle = (ep) => `Серия ${ep.episode_number}` + (ep.absolute != null ? ` (#${ep.absolute})` : ep.name ? ` — ${ep.name}` : '');
 
 // -> [{title, subtitle, season, episode, kind, selected}]; kind: 'continue' (the
 // computed target, selected), 'episode', 'season' (another season), 'list' (native list).
@@ -75,7 +74,7 @@ export function pickerItems({ season, target, episodes, watchedSet, inProgress, 
   if (target && target.season === season) {
     const ep = aired.find((e) => e.episode_number === target.episode);
     const item = {
-      title: `Продолжить: серия ${target.episode}`, subtitle: (ep && (ep.absolute != null ? mappedSubtitle(ep) : ep.name)) || '',
+      title: `Продолжить: серия ${target.episode}`, subtitle: '',
       season, episode: target.episode, kind: 'continue', selected: true,
     };
     if (ep && ep.absolute != null) item.absolute = ep.absolute;
@@ -90,7 +89,7 @@ export function pickerItems({ season, target, episodes, watchedSet, inProgress, 
     if (progress[key] != null) prefix = `▶ ${Math.max(1, Math.round(progress[key]))}% `;
     else if (watched.has(key)) prefix = '✓ ';
     const item = {
-      title: prefix + episodeTitle(ep), subtitle: mapped ? mappedSubtitle(ep) : formatDate(ep.air_date),
+      title: prefix + episodeTitle(ep), subtitle: '',
       season, episode: n, kind: 'episode', selected: false,
     };
     if (mapped) item.absolute = ep.absolute;

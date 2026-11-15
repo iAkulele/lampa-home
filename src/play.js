@@ -49,7 +49,17 @@ const MSG = {
   noServer: 'TorrServer не настроен',
   noFiles: 'TorrServer не получил список файлов',
   unknown: 'Не удалось запустить раздачу',
+  starting: (label) => `Запускаю: ${label}`,
 };
+
+// «2160p · 16,6 ГБ · HDRezka» for the toast shown when playback starts.
+export function releaseLabel(result) {
+  if (!result) return '';
+  const p = parseTitle(result.Title);
+  const gib = (Number(result.Size) || 0) / 1024 ** 3;
+  const size = gib >= 0.1 ? `${gib.toFixed(1).replace('.', ',')} ГБ` : '';
+  return [p.resolution ? `${p.resolution}p` : '', size, p.studio || ''].filter(Boolean).join(' · ');
+}
 
 // fatal: TorrServer itself is missing or unreachable; any other PlayError about one
 // release (no hash in time, no file list) only makes «Играть» try the next one.
@@ -529,6 +539,16 @@ export function openNativeList(params) {
   L.Activity.push({ url: '', title: L.Lang.translate('title_torrents'), component: 'torrents', ...params });
 }
 
+// Manual choice: Lampa's own torrent list with our search query (long press on
+// «Играть» or «Выбрать раздачу вручную» in the card's «...» menu).
+export function chooseManually(card) {
+  if (!card || current) return;
+  const kind = detectKind(card);
+  // The same first query «Играть» sends: short RU title, never a CJK original.
+  const titles = queryTitles(normalizeTitles(card), [], { kind });
+  openNativeList(firstQuery(card, { kind }, storageField('parse_lang'), titles));
+}
+
 let current = null;
 // True while «Играть» (or a play from «Скачанное») is starting.
 export const isBusy = () => !!current;
@@ -681,6 +701,7 @@ async function playFiles(job, card, movie, ctx, maxTries, filesText = MSG.files)
   L.Player.play(start);
   L.Player.playlist(playlist);
   L.Player.callback(() => L.Controller.toggle('content'));
+  if (job.pick) L.Noty.show(MSG.starting(releaseLabel(job.pick)));
   if (ctx.kind !== 'movie') {
     store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: job.hash });
   }
@@ -757,6 +778,7 @@ export async function run(card) {
       L.Loading.setText(i === 0 ? MSG.server : MSG.retry(i + 1, n));
       const hash = await addTorrent(cand, movie);
       job.hash = hash;
+      job.pick = cand;
       if (job.cancelled) {
         dropUnlessPreloaded(hash);
         return 'cancelled';
@@ -832,6 +854,7 @@ function addButton(e) {
   if (!row.length || row.find('.lh-play').length) return;
   const btn = $(`<div class="full-start__button selector lh-play">${PLAY_ICON}<span>Играть</span></div>`);
   btn.on('hover:enter', () => run(card));
+  btn.on('hover:long', () => chooseManually(card));
   row.first().prepend(btn);
 }
 
@@ -847,6 +870,10 @@ export function init() {
   const L = lampa();
   L.Listener.follow('full', (e) => {
     if (e.type == 'complite') addButton(e);
+    if (e.type === 'options' && Array.isArray(e.options)) {
+      const card = (e.link && e.link.card) || (e.data && e.data.movie);
+      if (card && card.id) e.options.push({ title: 'Выбрать раздачу вручную', onSelect: () => chooseManually(card) });
+    }
   });
   if (L.Player.listener) L.Player.listener.follow('start', onPlayerStart);
 }

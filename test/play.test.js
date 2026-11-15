@@ -2,8 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert';
 import {
   detectKind, pickFile, buildSearchParams, advanceWatched, timelineHashString, resumeTarget, normalizeTitles, titleHasSeason,
-  nextCandidates, previousEpisodeCtx, tryCandidates, PlayError,
+  nextCandidates, previousEpisodeCtx, tryCandidates, PlayError, releaseLabel,
 } from '../src/play.js';
+
+test('test_release_label', () => {
+  assert.strictEqual(releaseLabel({ Title: 'Film 2160p WEB-DL HDRezka', Size: 16.6 * GiB }), '2160p · 16,6 ГБ · hdrezka');
+  assert.strictEqual(releaseLabel({ Title: 'Film WEB-DL', Size: 0 }), '');
+  assert.strictEqual(releaseLabel(null), '');
+});
 
 const GiB = 1024 ** 3;
 

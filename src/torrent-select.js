@@ -11,6 +11,7 @@ import {
   DV_P5_MARKERS,
   HDR_MARKERS,
   SCORING,
+  SIZE_FLOORS,
   VOICE_MARKERS,
   EXT_AUDIO_MARKERS,
   RAW_MARKERS,
@@ -295,11 +296,23 @@ function rejectReason(p, result, ctx) {
   return null;
 }
 
+// Movies: 2160p lighter than 15 GiB counts as 1080p; 1080p lighter than 6 GiB as 'thin'.
+export function effectiveResolution(p, result, ctx) {
+  const floors = SIZE_FLOORS[ctx.kind];
+  const size = Number(result.Size) || 0;
+  if (!floors || !size) return p.resolution;
+  let res = p.resolution;
+  if (res === 2160 && size < floors[2160]) res = 1080;
+  if (res === 1080 && size < floors[1080]) res = 'thin';
+  return res;
+}
+
 function score(p, result, ctx) {
   const W = SCORING;
   let quality = W.quality.unknown;
-  if (p.resolution === 720) quality = ctx.kind === 'anime' ? W.quality.anime720 : W.quality[720];
-  else if (p.resolution) quality = W.quality[p.resolution];
+  const res = effectiveResolution(p, result, ctx);
+  if (res === 720) quality = ctx.kind === 'anime' ? W.quality.anime720 : W.quality[720];
+  else if (res) quality = W.quality[res];
 
   const pref = VOICE_PREFERENCE[ctx.kind] || [];
   const rank = pref.indexOf(p.studio);

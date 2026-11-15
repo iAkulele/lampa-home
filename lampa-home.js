@@ -256,6 +256,9 @@ body:not(.no--animation) .lh-catalog .card--wide {
     preload: "lh_preload",
     settings: "lh_settings"
   };
+  var SIZE_FLOORS = {
+    movie: { 2160: 15 * 1024 ** 3, 1080: 6 * 1024 ** 3 }
+  };
   var LIMITS = {
     searchTimeoutMs: 12e3,
     maxMovieBytes: 60 * 1024 ** 3,
@@ -289,7 +292,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var DV_P5_MARKERS = "\\bp5\\b|profile ?5";
   var HDR_MARKERS = "hdr10|hdr\\b|\\bp8\\b|profile ?8";
   var SCORING = {
-    quality: { 2160: 100, 1080: 80, 720: 20, anime720: 60, 480: 10, unknown: 40 },
+    // thin: a movie release lighter than its resolution's floor (SIZE_FLOORS).
+    quality: { 2160: 100, 1080: 80, 720: 20, anime720: 60, 480: 10, unknown: 40, thin: 20 },
     voiceFirst: 40,
     voiceSecond: 30,
     voiceAnyRussian: 15,
@@ -733,11 +737,21 @@ body:not(.no--animation) .lh-catalog .card--wide {
     if ((ctx.kind === "tv" || ctx.kind === "anime") && !hasEpisode(p, ctx)) return "episode-missing";
     return null;
   }
+  function effectiveResolution(p, result, ctx) {
+    const floors = SIZE_FLOORS[ctx.kind];
+    const size = Number(result.Size) || 0;
+    if (!floors || !size) return p.resolution;
+    let res = p.resolution;
+    if (res === 2160 && size < floors[2160]) res = 1080;
+    if (res === 1080 && size < floors[1080]) res = "thin";
+    return res;
+  }
   function score(p, result, ctx) {
     const W = SCORING;
     let quality = W.quality.unknown;
-    if (p.resolution === 720) quality = ctx.kind === "anime" ? W.quality.anime720 : W.quality[720];
-    else if (p.resolution) quality = W.quality[p.resolution];
+    const res = effectiveResolution(p, result, ctx);
+    if (res === 720) quality = ctx.kind === "anime" ? W.quality.anime720 : W.quality[720];
+    else if (res) quality = W.quality[res];
     const pref = VOICE_PREFERENCE[ctx.kind] || [];
     const rank = pref.indexOf(p.studio);
     let voice = 0;
@@ -1232,8 +1246,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }
     return out;
   }
-  var episodeTitle = (ep) => `\u0421\u0435\u0440\u0438\u044F ${ep.episode_number}` + (ep.name && ep.absolute == null ? ` \u2014 ${ep.name}` : "");
-  var mappedSubtitle = (ep) => [`#${ep.absolute}`, ep.name || formatDate(ep.air_date)].filter(Boolean).join(" \xB7 ");
+  var episodeTitle = (ep) => `\u0421\u0435\u0440\u0438\u044F ${ep.episode_number}` + (ep.absolute != null ? ` (#${ep.absolute})` : ep.name ? ` \u2014 ${ep.name}` : "");
   function pickerItems({ season, target, episodes, watchedSet, inProgress, today, seasonsCount = 1 }) {
     const aired = (episodes || []).filter((ep) => ep && ep.episode_number > 0 && isAired(ep, today));
     const watched = watchedSet || /* @__PURE__ */ new Set();
@@ -1244,7 +1257,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
       const ep = aired.find((e) => e.episode_number === target.episode);
       const item = {
         title: `\u041F\u0440\u043E\u0434\u043E\u043B\u0436\u0438\u0442\u044C: \u0441\u0435\u0440\u0438\u044F ${target.episode}`,
-        subtitle: ep && (ep.absolute != null ? mappedSubtitle(ep) : ep.name) || "",
+        subtitle: "",
         season,
         episode: target.episode,
         kind: "continue",
@@ -1263,7 +1276,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
       else if (watched.has(key)) prefix = "\u2713 ";
       const item = {
         title: prefix + episodeTitle(ep),
-        subtitle: mapped ? mappedSubtitle(ep) : formatDate(ep.air_date),
+        subtitle: "",
         season,
         episode: n,
         kind: "episode",
@@ -1641,8 +1654,16 @@ body:not(.no--animation) .lh-catalog .card--wide {
     torrserver: "TorrServer \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
     noServer: "TorrServer \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D",
     noFiles: "TorrServer \u043D\u0435 \u043F\u043E\u043B\u0443\u0447\u0438\u043B \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432",
-    unknown: "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0440\u0430\u0437\u0434\u0430\u0447\u0443"
+    unknown: "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0440\u0430\u0437\u0434\u0430\u0447\u0443",
+    starting: (label) => `\u0417\u0430\u043F\u0443\u0441\u043A\u0430\u044E: ${label}`
   };
+  function releaseLabel(result) {
+    if (!result) return "";
+    const p = parseTitle(result.Title);
+    const gib = (Number(result.Size) || 0) / 1024 ** 3;
+    const size = gib >= 0.1 ? `${gib.toFixed(1).replace(".", ",")} \u0413\u0411` : "";
+    return [p.resolution ? `${p.resolution}p` : "", size, p.studio || ""].filter(Boolean).join(" \xB7 ");
+  }
   var PlayError = class extends Error {
     constructor(msg, fatal = false) {
       super(msg);
@@ -2006,6 +2027,12 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const L = lampa();
     L.Activity.push({ url: "", title: L.Lang.translate("title_torrents"), component: "torrents", ...params });
   }
+  function chooseManually(card) {
+    if (!card || current) return;
+    const kind = detectKind(card);
+    const titles = queryTitles(normalizeTitles(card), [], { kind });
+    openNativeList(firstQuery(card, { kind }, storageField("parse_lang"), titles));
+  }
   var current = null;
   var isBusy = () => !!current;
   var playingId = null;
@@ -2121,6 +2148,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     L.Player.play(start3);
     L.Player.playlist(playlist);
     L.Player.callback(() => L.Controller.toggle("content"));
+    if (job.pick) L.Noty.show(MSG.starting(releaseLabel(job.pick)));
     if (ctx.kind !== "movie") {
       store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: job.hash });
     }
@@ -2187,6 +2215,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
         L.Loading.setText(i === 0 ? MSG.server : MSG.retry(i + 1, n));
         const hash = await addTorrent(cand, movie);
         job.hash = hash;
+        job.pick = cand;
         if (job.cancelled) {
           dropUnlessPreloaded(hash);
           return "cancelled";
@@ -2262,6 +2291,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     if (!row.length || row.find(".lh-play").length) return;
     const btn = $(`<div class="full-start__button selector lh-play">${PLAY_ICON}<span>\u0418\u0433\u0440\u0430\u0442\u044C</span></div>`);
     btn.on("hover:enter", () => run(card));
+    btn.on("hover:long", () => chooseManually(card));
     row.first().prepend(btn);
   }
   function onPlayerStart(data) {
@@ -2273,6 +2303,10 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const L = lampa();
     L.Listener.follow("full", (e) => {
       if (e.type == "complite") addButton(e);
+      if (e.type === "options" && Array.isArray(e.options)) {
+        const card = e.link && e.link.card || e.data && e.data.movie;
+        if (card && card.id) e.options.push({ title: "\u0412\u044B\u0431\u0440\u0430\u0442\u044C \u0440\u0430\u0437\u0434\u0430\u0447\u0443 \u0432\u0440\u0443\u0447\u043D\u0443\u044E", onSelect: () => chooseManually(card) });
+      }
     });
     if (L.Player.listener) L.Player.listener.follow("start", onPlayerStart);
   }
