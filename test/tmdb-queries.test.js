@@ -22,7 +22,7 @@ test('test_movies_row_uses_digital_release_us', () => {
   assert.strictEqual(q.params.filter['with_release_type'], '4');
   assert.strictEqual(q.params.filter.region, 'US');
   assert.strictEqual(q.params.sort_by, 'release_date.desc');
-  assert.strictEqual(q.params.filter['release_date.lte'], TODAY);
+  assert.strictEqual(q.params.filter['release_date.lte'], '2026-11-21');
   const without = q.params.filter.without_genres.split(',');
   assert.ok(without.includes('16'));
   assert.ok(without.includes('99'));
@@ -138,14 +138,14 @@ test('test_catalog_movie_new_has_digital_filter_and_votes', () => {
     const f = catalogQuery(kind, { genre: null, year: null, sort: 'new' }, 1, TODAY).params.filter;
     assert.strictEqual(f.with_release_type, '4');
     assert.strictEqual(f.region, 'US');
-    assert.strictEqual(f['release_date.lte'], TODAY);
+    assert.strictEqual(f['release_date.lte'], '2026-11-21');
     assert.strictEqual(f['vote_count.gte'], '10');
   }
   // rating sort keeps the digital filter and its own vote floor
   const r = catalogQuery('movie', { genre: null, year: null, sort: 'rating' }, 1, TODAY).params.filter;
   assert.strictEqual(r.with_release_type, '4');
   assert.strictEqual(r.region, 'US');
-  assert.strictEqual(r['release_date.lte'], TODAY);
+  assert.strictEqual(r['release_date.lte'], '2026-11-21');
   assert.strictEqual(r['vote_count.gte'], '100');
 });
 
@@ -163,7 +163,7 @@ test('test_movie_rows_sort_and_cap_by_release_date', () => {
   for (const row of ['movies', 'horror', 'cartoons']) {
     const q = rowQuery(row, TODAY);
     assert.strictEqual(q.params.sort_by, 'release_date.desc', row);
-    assert.strictEqual(q.params.filter['release_date.lte'], TODAY, row);
+    assert.strictEqual(q.params.filter['release_date.lte'], '2026-11-21', row);
     assert.ok(!('primary_release_date.lte' in q.params.filter), row);
     assert.strictEqual(q.params.filter.with_release_type, '4', row);
     assert.strictEqual(q.params.filter.region, 'US', row);
@@ -209,4 +209,20 @@ test('test_catalog_movie_lang_ru', () => {
   const n = catalogQuery('movie', { genre: null, year: null, sort: 'new', lang: null }, 1, TODAY);
   assert.strictEqual(n.params.filter.with_release_type, '4');
   assert.ok(!('with_original_language' in n.params.filter));
+});
+
+test('test_digital_filter_allows_seven_day_lookahead', () => {
+  const t = '2026-11-15';
+  for (const row of ['movies', 'horror', 'cartoons']) {
+    assert.strictEqual(rowQuery(row, t).params.filter['release_date.lte'], '2026-11-22', row);
+  }
+  for (const kind of ['movie', 'cartoon']) {
+    for (const sort of ['new', 'rating']) {
+      const f = catalogQuery(kind, { genre: null, year: null, sort }, 1, t).params.filter;
+      assert.strictEqual(f['release_date.lte'], '2026-11-22', `${kind}/${sort}`);
+    }
+  }
+  // Russian catalog and the russian row keep today as the cap.
+  assert.strictEqual(catalogQuery('movie', { genre: null, year: null, sort: 'new', lang: 'ru' }, 1, t).params.filter['release_date.lte'], t);
+  assert.strictEqual(rowQuery('russian', t).params.filter['release_date.lte'], t);
 });

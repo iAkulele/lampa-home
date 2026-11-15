@@ -51,14 +51,21 @@ export function daysAgo(today, n) {
   return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
 }
 
-// Digital release in the US, up to today. release_date (not primary_release_date)
+// Digital release in the US, up to a week ahead: TMDB's US digital date often lags
+// the real WEB-DL release by a few days.
+export const DIGITAL_LOOKAHEAD_DAYS = 7;
+export function digitalCutoff(today) {
+  return daysAgo(today, -DIGITAL_LOOKAHEAD_DAYS);
+}
+
+// Digital release in the US, up to today + lookahead. release_date (not primary_release_date)
 // is the field TMDB filters by release type and region: the digital date itself.
 const MOVIE_DATE = 'release_date';
 function movieFilter(today) {
   return {
     with_release_type: '4',
     region: 'US',
-    [`${MOVIE_DATE}.lte`]: today,
+    [`${MOVIE_DATE}.lte`]: digitalCutoff(today),
   };
 }
 
@@ -185,7 +192,7 @@ export function catalogQuery(kind, filters, page, today) {
     f['vote_count.gte'] = '100';
   } else {
     params.sort_by = `${dateField}.desc`;
-    f[`${dateField}.lte`] = today;
+    f[`${dateField}.lte`] = !isTv && filters.lang !== 'ru' ? digitalCutoff(today) : today;
     // A small vote floor drops obscure festival and stub entries from "new".
     f['vote_count.gte'] = isTv ? '5' : '10';
   }
