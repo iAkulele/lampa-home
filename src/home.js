@@ -1,9 +1,9 @@
 // Home screen component `lh_home`: six rows of wide cards instead of Lampa's main page.
-import { lampa, storageField } from './lampa.js';
+import { lampa, storageField, store } from './lampa.js';
 import * as play from './play.js';
 import * as catalog from './catalog.js';
-import { ROWS } from './config.js';
-import { loadRow, todayIso, tvStatus } from './tmdb.js';
+import { loadRow, loadCustomRow, todayIso, tvStatus, HISTORY_LIMIT } from './tmdb.js';
+import { homeRows, customPreset } from './rows.js';
 import { toWideCard, attachEpisodeBadge, applyPosterClass, pickBannerCard, latestWins } from './cards.js';
 import { BANNER, bannerText, bannerVars, genreMap } from './templates.js';
 
@@ -12,10 +12,18 @@ const TITLE = 'Главная';
 // Set on every live lh_home instance; menu.js uses it to tell ours from a nocomponent stub.
 const MARKER = 'lh_home_live';
 
-// Series and anime rows always get badges; history only for TV items.
-export function wantsBadge(rowKey, cardData) {
+// Series and anime rows always get badges; history only for TV items; a custom row
+// (custom: {kind}) like its catalog: TV and anime items.
+export function wantsBadge(rowKey, cardData, custom) {
   if (rowKey === 'anime' || rowKey === 'series') return true;
+  if (custom) return (custom.kind === 'tv' || custom.kind === 'anime') && !!cardData.original_name;
   return rowKey === 'history' && !!cardData.original_name;
+}
+
+// The rows of the lh_rows config (rows.js), loaded in screen order.
+const LOADERS = { row: loadRow, custom: loadCustomRow };
+export function loadHomeRows(cfg, today, loaders = LOADERS) {
+  return Promise.all(homeRows(cfg).map((r) => (r.custom ? loaders.custom(r.custom, today) : loaders.row(r.key, today))));
 }
 
 // Source card of the banner: first card of the movies row, else of the first row.
@@ -126,14 +134,23 @@ function createBanner(comp, card) {
   };
 }
 
+// Lampa shows «Ещё» only when total_pages > 1 (line/module/more.js). A row's own TMDB
+// query is narrower than its catalog (e.g. «Русское»: last 365 days, often one page),
+// so every row with a catalog reports at least 2. History has no pages: «Ещё» (Lampa's
+// history screen) only when the row is full.
+export function rowPages(rowKey, count, total) {
+  if (rowKey === 'history') return count >= HISTORY_LIMIT ? 2 : 1;
+  return Math.max(2, total || 1);
+}
+
 export function buildRows(loaded) {
   return loaded
     .filter((row) => row.results.length)
     .map((row) => ({
       title: row.title,
       results: row.results.map(toWideCard),
-      total_pages: row.total_pages || 1,
-      params: { items: { view: 6 }, lh_row: row.rowKey },
+      total_pages: rowPages(row.rowKey, row.results.length, row.total_pages),
+      params: { items: { view: 6 }, lh_row: row.rowKey, lh_custom: row.custom || null },
     }));
 }
 
@@ -179,7 +196,7 @@ function component(object) {
         this.items[0].toggle();
       };
       const today = todayIso();
-      Promise.all(ROWS.map((key) => loadRow(key, today))).then((loaded) => {
+      loadHomeRows(store.rows.get(), today).then((loaded) => {
         if (this.destroyed) return;
         const rows = buildRows(loaded);
         if (!rows.length) {
@@ -236,10 +253,11 @@ function component(object) {
     },
     onInstance(item, data) {
       const rowKey = data.params && data.params.lh_row;
+      const custom = (data.params && data.params.lh_custom) || null;
       item.use({
-        onMore: () => catalog.openForRow(rowKey),
+        onMore: () => (custom ? catalog.open(custom.kind, customPreset(custom)) : catalog.openForRow(rowKey)),
         onInstance(card, cardData) {
-          if (wantsBadge(rowKey, cardData)) attachEpisodeBadge(card, cardData, tvStatus, todayIso);
+          if (wantsBadge(rowKey, cardData, custom)) attachEpisodeBadge(card, cardData, tvStatus, todayIso);
           card.use({
             onCreate() {
               applyPosterClass(card.render(true), cardData);

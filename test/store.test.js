@@ -68,6 +68,16 @@ test('test_filters_per_kind_independent', () => {
   assert.deepStrictEqual(store.filters.get('series'), { genre: null, year: null, sort: 'new' });
 });
 
+test('test_rows_config_default_and_roundtrip', () => {
+  const { store, storage } = make();
+  assert.deepStrictEqual(store.rows.get(), { disabled: [], custom: [] });
+  const cfg = { disabled: ['horror'], custom: [{ id: 'a', kind: 'movie', genre: 35 }] };
+  store.rows.set(cfg);
+  assert.deepStrictEqual(store.rows.get(), cfg);
+  assert.deepStrictEqual(storage.get(STORAGE_KEYS.rows), cfg);
+  assert.strictEqual(STORAGE_KEYS.rows, 'lh_rows');
+});
+
 test('test_prune_keeps_200_newest', () => {
   const { store, clock, storage } = make(0);
   for (let i = 0; i < 250; i++) {
