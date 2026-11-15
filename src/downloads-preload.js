@@ -26,6 +26,17 @@ function showError(err) {
 const fileFor = (files, ctx, releaseTitle, movie) =>
   pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(releaseTitle) }, fileInfos(files, movie));
 
+// Back on the loader: drop what was added and stop. Once the old download is being
+// replaced (job.committed) Back does nothing, or the card would lose both downloads.
+export function makeCancel(job, dropAdded, finish) {
+  return () => {
+    if (job.committed) return;
+    job.cancelled = true;
+    dropAdded();
+    finish();
+  };
+}
+
 export async function preload(card) {
   const L = lampa();
   if (!card || busy || isBusy()) return;
@@ -47,11 +58,7 @@ export async function preload(card) {
     if (loading) L.Loading.stop();
     loading = false;
   };
-  const cancel = () => {
-    job.cancelled = true;
-    dropAdded();
-    finish();
-  };
+  const cancel = makeCancel(job, dropAdded, finish);
   L.Loading.start(cancel, MSG.search);
   try {
     tsBase();
@@ -114,6 +121,8 @@ export async function preload(card) {
     let replaced = false;
     if (replacePlan(existing, hash) === 'replace') {
       L.Loading.setText(MSG.removing);
+      // Past this point Back is ignored: the old download goes from the disk.
+      job.committed = true;
       try {
         await helperDelete(existing.hash);
       } catch (e) {

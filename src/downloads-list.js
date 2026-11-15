@@ -38,12 +38,15 @@ export async function listDownloads() {
   return entries;
 }
 
+// A hung request would freeze every badge: the screen polls only when the last tick is done.
+const STATUS_TIMEOUT_MS = 8000;
+
 // -> {loaded, size, percent, done}, or {missing: true} when TorrServer no longer
 // knows the hash (removed on the server: `get` answers 404).
 export async function status(hash, index) {
   let json;
   try {
-    json = await tsTorrents({ action: 'get', hash });
+    json = await tsTorrents({ action: 'get', hash }, STATUS_TIMEOUT_MS);
   } catch (err) {
     if (err && err.status === 404) return { loaded: 0, size: 0, percent: 0, done: false, missing: true };
     throw err;
