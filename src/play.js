@@ -5,6 +5,7 @@ import { LIMITS } from './config.js';
 import { selectTorrent, parseTitle } from './torrent-select.js';
 import { episodeStatus, nextEpisode, absoluteEpisode, parseEpisode } from './episodes.js';
 import { loadTv, todayIso } from './tmdb.js';
+import { askEpisode } from './episode-picker.js';
 import {
   isLatinOrCyrillic, latinAltTitles, cyrillicAltTitles, queryTitles, firstQuery, followUpQueries, mergeResults, searchParamsFor,
   FEW_RESULTS,
@@ -440,7 +441,7 @@ function buildPlaylist(files, movie, hash) {
   });
 }
 
-function openNativeList(params) {
+export function openNativeList(params) {
   const L = lampa();
   L.Activity.push({ url: '', title: L.Lang.translate('title_torrents'), component: 'torrents', ...params });
 }
@@ -507,23 +508,54 @@ export async function resolveTarget(card) {
   return { kind, ctx, movie, tv: details };
 }
 
+// «Спрашивать серию при запуске» (lh_ask_episode, on by default).
+export const asksEpisode = (ctx) => !!ctx && ctx.kind !== 'movie' && storageField('lh_ask_episode') !== false;
+
+// Episode picker for a resolved series target -> the ctx to search for, 'list'
+// («Все раздачи») or null (Back). The loader must be stopped before.
+export async function chooseEpisode(card, { movie, ctx, tv }) {
+  const seasons = (tv && tv.seasons) || card.seasons || [];
+  const picked = await askEpisode({
+    title: movie.title || movie.name || card.title || card.name || '',
+    tv: tv ? { ...tv, id: tv.id != null ? tv.id : card.id } : { id: card.id, seasons },
+    target: { season: ctx.season, episode: ctx.episode },
+    progress: store.progress.get(card.id),
+    view: timelineOf(movie),
+  });
+  if (!picked || picked === 'list') return picked;
+  return { ...ctx, season: picked.season, episode: picked.episode, absolute: absoluteEpisode(seasons, picked.season, picked.episode) };
+}
+
 // One play attempt at a time; Back on the loader cancels it (onCancel runs first).
 function beginJob(text, onCancel) {
   const L = lampa();
   if (current) return null;
-  const job = { cancelled: false, timer: null, hash: null, deadline: null };
+  // loading: the loader is shown (paused while the episode picker is open: a
+  // second Loading.stop would toggle a stale controller).
+  const job = { cancelled: false, timer: null, hash: null, deadline: null, loading: true };
   current = job;
+  const cancel = () => {
+    job.cancelled = true;
+    onCancel(job);
+    job.finish();
+  };
+  job.pause = () => {
+    job.loading = false;
+    L.Loading.stop();
+  };
+  // The loader again after a pause (the episode picker).
+  job.restart = (t) => {
+    job.loading = true;
+    L.Loading.start(cancel, t);
+  };
   job.finish = () => {
     if (job.timer) clearInterval(job.timer);
     if (job.deadline) clearTimeout(job.deadline);
     if (current === job) current = null;
-    L.Loading.stop();
+    if (job.loading) L.Loading.stop();
+    job.loading = false;
   };
-  L.Loading.start(() => {
-    job.cancelled = true;
-    onCancel(job);
-    job.finish();
-  }, text);
+  L.Loading.start(cancel, text);
   return job;
 }
 
@@ -569,17 +601,42 @@ export async function run(card) {
   let params = buildSearchParams(card, { kind }, storageField('parse_lang'));
   // The parser timeout, TorrServer and several file polls must not add up to
   // minutes: past RUN_TIMEOUT_MS the run stops and the native list opens.
-  job.deadline = setTimeout(() => {
-    if (current !== job || job.cancelled) return;
-    job.cancelled = true;
-    dropUnlessPreloaded(job.hash);
-    finish();
-    L.Noty.show(MSG.timeout);
-    openNativeList(params);
-  }, RUN_TIMEOUT_MS);
+  const arm = () => {
+    clearTimeout(job.deadline);
+    job.deadline = setTimeout(() => {
+      if (current !== job || job.cancelled) return;
+      job.cancelled = true;
+      dropUnlessPreloaded(job.hash);
+      finish();
+      L.Noty.show(MSG.timeout);
+      openNativeList(params);
+    }, RUN_TIMEOUT_MS);
+  };
+  arm();
   try {
-    const { movie, ctx } = await resolveTarget(card);
+    const target = await resolveTarget(card);
+    const { movie } = target;
+    let { ctx } = target;
     if (job.cancelled) return;
+    if (asksEpisode(ctx)) {
+      // User thinking time does not count against the run's cap.
+      clearTimeout(job.deadline);
+      job.deadline = null;
+      job.pause();
+      const picked = await chooseEpisode(card, target);
+      if (job.cancelled) return;
+      if (!picked || picked === 'list') {
+        job.cancelled = true;
+        finish();
+        if (picked === 'list') openNativeList(buildSearchParams(movie, ctx, storageField('parse_lang')));
+        return;
+      }
+      ctx = picked;
+      // Remembered at once: an external player may never report back.
+      store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: null });
+      job.restart(MSG.search);
+      arm();
+    }
     params = buildSearchParams(movie, ctx, storageField('parse_lang'));
 
     const found = await findReleases(movie, ctx, job);

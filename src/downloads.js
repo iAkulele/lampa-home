@@ -9,6 +9,7 @@
 import { lampa, store, storageField } from './lampa.js';
 import {
   resolveTarget, findReleases, pickFile, fileInfos, titleHasSeason, startFromHash, isBusy,
+  asksEpisode, chooseEpisode, openNativeList, buildSearchParams,
 } from './play.js';
 import { selectTorrent } from './torrent-select.js';
 import { toWideCard, applyPosterClass } from './cards.js';
@@ -336,19 +337,40 @@ export async function preload(card) {
     if (store.preload.all().some((e) => e.hash === job.hash)) return;
     tsRem(job.hash);
   };
+  let loading = true;
   const finish = () => {
     busy = false;
-    L.Loading.stop();
+    if (loading) L.Loading.stop();
+    loading = false;
   };
-  L.Loading.start(() => {
+  const cancel = () => {
     job.cancelled = true;
     dropAdded();
     finish();
-  }, MSG.search);
+  };
+  L.Loading.start(cancel, MSG.search);
   try {
     tsBase();
-    const { movie, ctx } = await resolveTarget(card);
+    const target = await resolveTarget(card);
+    const { movie } = target;
+    let { ctx } = target;
     if (job.cancelled) return;
+    // «Скачать заранее» asks which episode to download, like «Играть».
+    if (asksEpisode(ctx)) {
+      loading = false;
+      L.Loading.stop();
+      const picked = await chooseEpisode(card, target);
+      if (job.cancelled) return;
+      if (!picked || picked === 'list') {
+        job.cancelled = true;
+        finish();
+        if (picked === 'list') openNativeList(buildSearchParams(movie, ctx, storageField('parse_lang')));
+        return;
+      }
+      ctx = picked;
+      loading = true;
+      L.Loading.start(cancel, MSG.search);
+    }
     const found = await findReleases(movie, ctx, job);
     if (job.cancelled) return;
     const { chosen } = selectTorrent(found.results, { ...ctx, names: found.names });

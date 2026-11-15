@@ -1,4 +1,4 @@
-// Settings section "Lampa Home": banner, random banner, notifications, PC helper address, cache reset.
+// Settings section "Lampa Home": banner, random banner, notifications, episode picker, PC helper address, cache reset.
 import { lampa, storage, noty } from './lampa.js';
 import { STORAGE_KEYS } from './config.js';
 import { HELPER_DEFAULT } from './downloads.js';
@@ -29,6 +29,11 @@ export function register() {
     component: COMPONENT,
     param: { name: 'lh_notify', type: 'trigger', default: true },
     field: { name: 'Уведомления о новых сериях', description: 'При запуске сообщать о новых сериях просматриваемого аниме' },
+  });
+  api.addParam({
+    component: COMPONENT,
+    param: { name: 'lh_ask_episode', type: 'trigger', default: true },
+    field: { name: 'Спрашивать серию при запуске', description: 'Перед «Играть» и «Скачать заранее» у сериала показать список серий с отметками о просмотренных' },
   });
   api.addParam({
     component: COMPONENT,

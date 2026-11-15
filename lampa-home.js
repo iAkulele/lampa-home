@@ -1020,6 +1020,159 @@ body:not(.no--animation) .lh-catalog .card--wide {
     );
   }
 
+  // src/episode-picker.js
+  var WATCHED_PERCENT = 85;
+  var SEASON_TIMEOUT_MS = 5e3;
+  function formatDate(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+    return m ? `${m[3]}.${m[2]}.${m[1]}` : "";
+  }
+  var isAired = (ep, today) => ep.aired === true || !!ep.air_date && (!today || ep.air_date <= today);
+  function fallbackEpisodes(season, count) {
+    const out = [];
+    for (let n = 1; n <= count; n++) out.push({ episode_number: n, season_number: season, name: "", air_date: null, aired: true });
+    return out;
+  }
+  function watchedEpisodes(season, numbers, progress, view) {
+    const out = /* @__PURE__ */ new Set();
+    for (const n of numbers || []) {
+      const later = !!progress && (progress.season > season || progress.season === season && progress.episode > n);
+      const v = view ? view(season, n) : null;
+      if (later || v && v.percent >= WATCHED_PERCENT) out.add(n);
+    }
+    return out;
+  }
+  function inProgressEpisodes(season, numbers, view) {
+    const out = {};
+    for (const n of numbers || []) {
+      const v = view ? view(season, n) : null;
+      if (v && v.time > 0 && v.percent < WATCHED_PERCENT) out[n] = v.percent;
+    }
+    return out;
+  }
+  var episodeTitle = (ep) => `\u0421\u0435\u0440\u0438\u044F ${ep.episode_number}` + (ep.name ? ` \u2014 ${ep.name}` : "");
+  function pickerItems({ season, target, episodes, watchedSet, inProgress, today, seasonsCount = 1 }) {
+    const aired = (episodes || []).filter((ep) => ep && ep.episode_number > 0 && isAired(ep, today));
+    const watched = watchedSet || /* @__PURE__ */ new Set();
+    const progress = inProgress || {};
+    const items = [];
+    if (target && target.season === season) {
+      const ep = aired.find((e) => e.episode_number === target.episode);
+      items.push({
+        title: `\u041F\u0440\u043E\u0434\u043E\u043B\u0436\u0438\u0442\u044C: \u0441\u0435\u0440\u0438\u044F ${target.episode}`,
+        subtitle: ep && ep.name || "",
+        season,
+        episode: target.episode,
+        kind: "continue",
+        selected: true
+      });
+    }
+    for (const ep of aired) {
+      const n = ep.episode_number;
+      let prefix = "";
+      if (progress[n] != null) prefix = `\u25B6 ${Math.max(1, Math.round(progress[n]))}% `;
+      else if (watched.has(n)) prefix = "\u2713 ";
+      items.push({
+        title: prefix + episodeTitle(ep),
+        subtitle: formatDate(ep.air_date),
+        season,
+        episode: n,
+        kind: "episode",
+        selected: false
+      });
+    }
+    if (seasonsCount > 1) items.push({ title: "\u0414\u0440\u0443\u0433\u043E\u0439 \u0441\u0435\u0437\u043E\u043D\u2026", subtitle: "", season, episode: null, kind: "season", selected: false });
+    items.push({ title: "\u0412\u0441\u0435 \u0440\u0430\u0437\u0434\u0430\u0447\u0438", subtitle: "", season, episode: null, kind: "list", selected: false });
+    return items;
+  }
+  function seasonItems(tv, current2, today) {
+    const status2 = tv ? episodeStatus(tv, today) : null;
+    return (tv && tv.seasons || []).filter((s) => s && s.season_number > 0 && s.episode_count > 0).filter((s) => s.air_date ? s.air_date <= today : !status2 || s.season_number <= status2.season).filter((s) => !status2 || s.season_number <= status2.season).sort((a, b) => a.season_number - b.season_number).map((s) => ({
+      title: `\u0421\u0435\u0437\u043E\u043D ${s.season_number}`,
+      subtitle: formatDate(s.air_date),
+      season: s.season_number,
+      selected: s.season_number === current2
+    }));
+  }
+  function airedCount(tv, season, today) {
+    const s = (tv && tv.seasons || []).find((x) => x && x.season_number === season);
+    const status2 = tv ? episodeStatus(tv, today) : null;
+    if (status2 && season === status2.season) return status2.aired;
+    if (status2 && season > status2.season) return 0;
+    return s ? s.episode_count : 0;
+  }
+  var seasonCache = /* @__PURE__ */ new Map();
+  function seasonEpisodes(tv, season, today) {
+    const key = tv.id + ":" + season;
+    if (seasonCache.has(key)) return Promise.resolve(seasonCache.get(key));
+    const fallback = () => fallbackEpisodes(season, airedCount(tv, season, today));
+    let timer;
+    const req = new Promise((resolve, reject) => {
+      timer = setTimeout(reject, SEASON_TIMEOUT_MS);
+      tmdbGet(`tv/${tv.id}/season/${season}`, {}, resolve, reject);
+    });
+    return req.then(
+      (json) => {
+        const eps = json && Array.isArray(json.episodes) ? json.episodes : null;
+        if (!eps || !eps.length) return fallback();
+        seasonCache.set(key, eps);
+        return eps;
+      },
+      fallback
+    ).finally(() => clearTimeout(timer));
+  }
+  function askEpisode({ title, tv, target, progress, view }) {
+    const L = lampa();
+    const today = todayIso();
+    const name = L.Controller.enabled().name;
+    const enabled = !name || name === "select" || name === "loading" ? "content" : name;
+    const seasons = tv ? seasonItems(tv, target.season, today) : [];
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        L.Controller.toggle(enabled);
+        resolve(value);
+      };
+      const showSeasons = (current2) => {
+        L.Select.show({
+          title: title || "\u0421\u0435\u0437\u043E\u043D",
+          items: seasonItems(tv, current2, today),
+          onSelect: (a) => showEpisodes(a.season, false),
+          onBack: () => showEpisodes(current2, current2 === target.season)
+        });
+      };
+      function showEpisodes(season, withTarget) {
+        seasonEpisodes(tv || { id: 0 }, season, today).then((episodes) => {
+          if (done) return;
+          const numbers = episodes.map((e) => e.episode_number);
+          const items = pickerItems({
+            season,
+            target: withTarget ? target : null,
+            episodes,
+            watchedSet: watchedEpisodes(season, numbers, progress, view),
+            inProgress: inProgressEpisodes(season, numbers, view),
+            today,
+            seasonsCount: seasons.length
+          });
+          L.Select.show({
+            title: `${title ? title + " \xB7 " : ""}\u0421\u0435\u0437\u043E\u043D ${season}`,
+            items,
+            onSelect: (a) => {
+              if (a.kind === "season") return showSeasons(season);
+              if (a.kind === "list") return finish("list");
+              finish({ season: a.season, episode: a.episode });
+            },
+            // Back from another season returns to the target's season first.
+            onBack: () => season === target.season ? finish(null) : showEpisodes(target.season, true)
+          });
+        });
+      }
+      showEpisodes(target.season, true);
+    });
+  }
+
   // src/search-query.js
   var MIN_TITLE = 4;
   var MAX_TITLE = 60;
@@ -1176,7 +1329,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var VIDEO = ["asf", "wmv", "divx", "avi", "mp4", "m4v", "mov", "3gp", "3g2", "mkv", "trp", "tp", "mts", "mpg", "mpeg", "dat", "vob", "rm", "rmvb", "m2ts", "ts"];
   var INDIVIDUAL = ["vob", "m2ts"];
   var FILES_EVERY_MS = 2e3;
-  var WATCHED_PERCENT = 85;
+  var WATCHED_PERCENT2 = 85;
   var FILES_TRIES = 20;
   var FILES_TRIES_EXTRA = 10;
   var HASH_TIMEOUT_MS = 2e4;
@@ -1302,7 +1455,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   }
   function resumeTarget(progress, view) {
     if (!progress || !view) return null;
-    if (!(view.time > 0) || !(view.percent < WATCHED_PERCENT)) return null;
+    if (!(view.time > 0) || !(view.percent < WATCHED_PERCENT2)) return null;
     return { season: progress.season, episode: progress.episode };
   }
   function normalizeTitles(card) {
@@ -1531,7 +1684,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const view = timelineOf(movie);
     return (season, episode) => {
       const v = view(season, episode);
-      return !!v && v.percent >= WATCHED_PERCENT;
+      return !!v && v.percent >= WATCHED_PERCENT2;
     };
   }
   function dropUnlessPreloaded(hash) {
@@ -1559,22 +1712,45 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const ctx = { kind, season: target.season, episode: target.episode, absolute: absoluteEpisode(seasons, target.season, target.episode) };
     return { kind, ctx, movie, tv: details };
   }
+  var asksEpisode = (ctx) => !!ctx && ctx.kind !== "movie" && storageField("lh_ask_episode") !== false;
+  async function chooseEpisode(card, { movie, ctx, tv }) {
+    const seasons = tv && tv.seasons || card.seasons || [];
+    const picked = await askEpisode({
+      title: movie.title || movie.name || card.title || card.name || "",
+      tv: tv ? { ...tv, id: tv.id != null ? tv.id : card.id } : { id: card.id, seasons },
+      target: { season: ctx.season, episode: ctx.episode },
+      progress: store.progress.get(card.id),
+      view: timelineOf(movie)
+    });
+    if (!picked || picked === "list") return picked;
+    return { ...ctx, season: picked.season, episode: picked.episode, absolute: absoluteEpisode(seasons, picked.season, picked.episode) };
+  }
   function beginJob(text, onCancel) {
     const L = lampa();
     if (current) return null;
-    const job = { cancelled: false, timer: null, hash: null, deadline: null };
+    const job = { cancelled: false, timer: null, hash: null, deadline: null, loading: true };
     current = job;
+    const cancel = () => {
+      job.cancelled = true;
+      onCancel(job);
+      job.finish();
+    };
+    job.pause = () => {
+      job.loading = false;
+      L.Loading.stop();
+    };
+    job.restart = (t) => {
+      job.loading = true;
+      L.Loading.start(cancel, t);
+    };
     job.finish = () => {
       if (job.timer) clearInterval(job.timer);
       if (job.deadline) clearTimeout(job.deadline);
       if (current === job) current = null;
-      L.Loading.stop();
+      if (job.loading) L.Loading.stop();
+      job.loading = false;
     };
-    L.Loading.start(() => {
-      job.cancelled = true;
-      onCancel(job);
-      job.finish();
-    }, text);
+    L.Loading.start(cancel, text);
     return job;
   }
   async function playFiles(job, card, movie, ctx, maxTries, filesText = MSG.files) {
@@ -1609,17 +1785,40 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const finish = job.finish;
     const kind = detectKind(card);
     let params = buildSearchParams(card, { kind }, storageField("parse_lang"));
-    job.deadline = setTimeout(() => {
-      if (current !== job || job.cancelled) return;
-      job.cancelled = true;
-      dropUnlessPreloaded(job.hash);
-      finish();
-      L.Noty.show(MSG.timeout);
-      openNativeList(params);
-    }, RUN_TIMEOUT_MS);
+    const arm = () => {
+      clearTimeout(job.deadline);
+      job.deadline = setTimeout(() => {
+        if (current !== job || job.cancelled) return;
+        job.cancelled = true;
+        dropUnlessPreloaded(job.hash);
+        finish();
+        L.Noty.show(MSG.timeout);
+        openNativeList(params);
+      }, RUN_TIMEOUT_MS);
+    };
+    arm();
     try {
-      const { movie, ctx } = await resolveTarget(card);
+      const target = await resolveTarget(card);
+      const { movie } = target;
+      let { ctx } = target;
       if (job.cancelled) return;
+      if (asksEpisode(ctx)) {
+        clearTimeout(job.deadline);
+        job.deadline = null;
+        job.pause();
+        const picked = await chooseEpisode(card, target);
+        if (job.cancelled) return;
+        if (!picked || picked === "list") {
+          job.cancelled = true;
+          finish();
+          if (picked === "list") openNativeList(buildSearchParams(movie, ctx, storageField("parse_lang")));
+          return;
+        }
+        ctx = picked;
+        store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: null });
+        job.restart(MSG.search);
+        arm();
+      }
       params = buildSearchParams(movie, ctx, storageField("parse_lang"));
       const found = await findReleases(movie, ctx, job);
       if (job.cancelled) return;
@@ -2515,19 +2714,39 @@ body:not(.no--animation) .lh-catalog .card--wide {
       if (store.preload.all().some((e) => e.hash === job.hash)) return;
       tsRem(job.hash);
     };
+    let loading = true;
     const finish = () => {
       busy = false;
-      L.Loading.stop();
+      if (loading) L.Loading.stop();
+      loading = false;
     };
-    L.Loading.start(() => {
+    const cancel = () => {
       job.cancelled = true;
       dropAdded();
       finish();
-    }, MSG2.search);
+    };
+    L.Loading.start(cancel, MSG2.search);
     try {
       tsBase();
-      const { movie, ctx } = await resolveTarget(card);
+      const target = await resolveTarget(card);
+      const { movie } = target;
+      let { ctx } = target;
       if (job.cancelled) return;
+      if (asksEpisode(ctx)) {
+        loading = false;
+        L.Loading.stop();
+        const picked = await chooseEpisode(card, target);
+        if (job.cancelled) return;
+        if (!picked || picked === "list") {
+          job.cancelled = true;
+          finish();
+          if (picked === "list") openNativeList(buildSearchParams(movie, ctx, storageField("parse_lang")));
+          return;
+        }
+        ctx = picked;
+        loading = true;
+        L.Loading.start(cancel, MSG2.search);
+      }
       const found = await findReleases(movie, ctx, job);
       if (job.cancelled) return;
       const { chosen } = selectTorrent(found.results, { ...ctx, names: found.names });
@@ -2987,6 +3206,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
       component: COMPONENT2,
       param: { name: "lh_notify", type: "trigger", default: true },
       field: { name: "\u0423\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E \u043D\u043E\u0432\u044B\u0445 \u0441\u0435\u0440\u0438\u044F\u0445", description: "\u041F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0441\u043E\u043E\u0431\u0449\u0430\u0442\u044C \u043E \u043D\u043E\u0432\u044B\u0445 \u0441\u0435\u0440\u0438\u044F\u0445 \u043F\u0440\u043E\u0441\u043C\u0430\u0442\u0440\u0438\u0432\u0430\u0435\u043C\u043E\u0433\u043E \u0430\u043D\u0438\u043C\u0435" }
+    });
+    api.addParam({
+      component: COMPONENT2,
+      param: { name: "lh_ask_episode", type: "trigger", default: true },
+      field: { name: "\u0421\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C \u0441\u0435\u0440\u0438\u044E \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435", description: "\u041F\u0435\u0440\u0435\u0434 \xAB\u0418\u0433\u0440\u0430\u0442\u044C\xBB \u0438 \xAB\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u0437\u0430\u0440\u0430\u043D\u0435\u0435\xBB \u0443 \u0441\u0435\u0440\u0438\u0430\u043B\u0430 \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0441\u043F\u0438\u0441\u043E\u043A \u0441\u0435\u0440\u0438\u0439 \u0441 \u043E\u0442\u043C\u0435\u0442\u043A\u0430\u043C\u0438 \u043E \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D\u043D\u044B\u0445" }
     });
     api.addParam({
       component: COMPONENT2,
