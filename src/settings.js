@@ -8,6 +8,7 @@ const ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000
 
 export function resetCache() {
   storage.set(STORAGE_KEYS.tvcache, {});
+  storage.set(STORAGE_KEYS.seasonmap, {});
   storage.set(STORAGE_KEYS.seen, {});
   noty('Очищено');
 }

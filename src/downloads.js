@@ -8,7 +8,7 @@
 // when TorrServer is unreachable.
 import { lampa, store, storageField } from './lampa.js';
 import {
-  resolveTarget, findReleases, pickFile, fileInfos, titleHasSeason, startFromHash, isBusy,
+  resolveTarget, findReleases, pickFile, fileInfos, titleHasSeason, startFromHash, isBusy, trackerFields, inferTracker,
   asksEpisode, chooseEpisode, openNativeList, buildSearchParams,
 } from './play.js';
 import { selectTorrent } from './torrent-select.js';
@@ -142,6 +142,7 @@ export function parseDownloadEntries(list) {
       season: meta.season,
       episode: meta.episode,
       absolute: meta.absolute,
+      ...trackerFields(meta),
       kind: meta.kind,
       added: Number(meta.added) || (Number(t.timestamp) || 0) * 1000,
       size: t.torrent_size,
@@ -273,7 +274,7 @@ let busy = false;
 // The local copy of an entry (fallback when TorrServer is unreachable).
 const cacheEntry = (e) => ({
   hash: e.hash, index: e.index, title: e.title, kind: e.kind, season: e.season, episode: e.episode,
-  absolute: e.absolute, size: e.size, added: e.added, card: e.card,
+  absolute: e.absolute, ...trackerFields(e), size: e.size, added: e.added, card: e.card,
 });
 
 // The new local copy for TorrServer's list, or null to keep the old one: an empty
@@ -304,6 +305,7 @@ export async function listDownloads() {
     const { server, ...entry } = e;
     const meta = {
       index: entry.index, kind: entry.kind, season: entry.season, episode: entry.episode, absolute: entry.absolute,
+      ...trackerFields(entry),
       added: entry.added || Date.now(), by: deviceName(),
     };
     const fields = { title: server.title || '', poster: server.poster || '', category: server.category || '' };
@@ -373,6 +375,7 @@ export async function preload(card) {
     }
     const found = await findReleases(movie, ctx, job);
     if (job.cancelled) return;
+    ctx = inferTracker(ctx, found.results, found.names);
     const { chosen } = selectTorrent(found.results, { ...ctx, names: found.names });
     if (!chosen) throw fail(MSG.none);
 
@@ -383,7 +386,7 @@ export async function preload(card) {
     const snapshot = cardSnapshot(movie);
     const title = String(chosen.Title).replace('??', '?');
     const meta = {
-      kind: ctx.kind, season: ctx.season, episode: ctx.episode, absolute: ctx.absolute,
+      kind: ctx.kind, season: ctx.season, episode: ctx.episode, absolute: ctx.absolute, ...trackerFields(ctx),
       added: Date.now(), by: deviceName(),
     };
     const fields = {
@@ -466,7 +469,7 @@ export async function startPreload(entry) {
     const json = await tsTorrents({ action: 'get', hash: entry.hash });
     const files = (json && json.file_stats) || [];
     if (!files.length) throw fail(MSG.noFiles);
-    const ctx = { kind: entry.kind, season: entry.season, episode: entry.episode, absolute: entry.absolute };
+    const ctx = { kind: entry.kind, season: entry.season, episode: entry.episode, absolute: entry.absolute, ...trackerFields(entry) };
     const file = pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(entry.title || '') }, fileInfos(files, entry.card));
     if (!file) throw fail(MSG.noFile);
     firePreload(entry.hash, file.id);
@@ -657,7 +660,7 @@ function component(object) {
           if (state && state.missing) return confirmRemove(entry);
           if (state && state.notStarted) return offerStart(entry);
           const { card, hash, index, kind, season, episode, absolute, title } = entry;
-          startFromHash(hash, card, { kind, season, episode, absolute, index }, title);
+          startFromHash(hash, card, { kind, season, episode, absolute, index, ...trackerFields(entry) }, title);
         }),
         onFocus() {
           L.Background.change(L.Utils.cardImgBackground(data));

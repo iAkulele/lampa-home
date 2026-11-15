@@ -51,6 +51,21 @@ export function createStore(storage, now = () => Date.now()) {
     },
   };
 
+  // Tracker seasons of a single-season anime (TMDB episode group): {map} with
+  // map null when the show has none; same TTL as tvcache.
+  const seasonmap = {
+    get(tvId) {
+      const e = read(STORAGE_KEYS.seasonmap)[tvId];
+      if (!e || now() - e.checked > LIMITS.tvCacheMs) return null;
+      return e;
+    },
+    set(tvId, map) {
+      const all = read(STORAGE_KEYS.seasonmap);
+      all[tvId] = { map: map || null, checked: now() };
+      storage.set(STORAGE_KEYS.seasonmap, all);
+    },
+  };
+
   const notify = {
     due() {
       const at = storage.get(STORAGE_KEYS.notifyAt, 0);
@@ -114,7 +129,8 @@ export function createStore(storage, now = () => Date.now()) {
   function prune() {
     trim(STORAGE_KEYS.progress, 'updated');
     trim(STORAGE_KEYS.tvcache, 'checked');
+    trim(STORAGE_KEYS.seasonmap, 'checked');
   }
 
-  return { progress, seen, tvcache, notify, filters, preload, prune };
+  return { progress, seen, tvcache, seasonmap, notify, filters, preload, prune };
 }

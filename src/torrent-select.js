@@ -65,7 +65,7 @@ function detectVoice(t, studio, audioText) {
 }
 
 // Seasons covered by the title: S01-S03, S02, "Сезон 2", "Сезон: 1-3",
-// "Season 3", "2nd Season", "TV-2".
+// "Season 3", "2nd Season", "TV-2", "[ТВ-3]".
 function detectSeasons(t) {
   const out = new Set();
   const add = (a, b) => {
@@ -78,7 +78,7 @@ function detectSeasons(t) {
   while ((m = en.exec(t))) add(+m[1], m[2] ? +m[2] : +m[1]);
   const nth = /(?<![\p{L}\d])(\d{1,2})(?:st|nd|rd|th)\s+season/giu;
   while ((m = nth.exec(t))) add(+m[1], +m[1]);
-  const tv = /(?<![\p{L}\d])tv-?(\d{1,2})(?![\d])/giu;
+  const tv = /(?<![\p{L}\d])(?:tv|тв)-?(\d{1,2})(?![\d])/giu;
   while ((m = tv.exec(t))) add(+m[1], +m[1]);
   // "4 сезон: 1-8 серии", "1-3 сезоны": the number before the word wins, and then
   // the digits after "сезон:" are episodes, not seasons.
@@ -141,11 +141,37 @@ export function parseTitle(title) {
     episodeRange: range,
     sxeRange: detectSxeRange(t),
     episode: ep.episode == null ? null : ep,
+    total: statedTotal(t),
   };
 }
 
-// Does the release provably contain the target episode of ctx?
+const seasonTagged = (p) => !!(p.seasons || p.sxeRange || (p.episode && p.episode.season != null));
+
+// Does the release provably contain the target episode of ctx? With tracker
+// seasons (ctx.trackerSeason: a single-season anime split into seasons on the
+// trackers) a season-tagged release is judged by the tracker season/episode,
+// an untagged one by the absolute number (ctx.season 1, ctx.absolute).
 function hasEpisode(p, ctx) {
+  if (ctx.trackerSeason == null) return hasEpisodePlain(p, ctx);
+  const plain = { ...ctx, trackerSeason: null };
+  if (!seasonTagged(p)) {
+    // "(24 из 24) Complete": a whole pack of N episodes, not every episode.
+    if (!p.episodeRange && !p.episode && p.total > 0) return ctx.absolute <= p.total;
+    return hasEpisodePlain(p, plain);
+  }
+  // Inside a tracker season the numbers are per season; "4 сезон — Серия 3" is
+  // another tracker season even though its bare episode number matches.
+  const tracker = { ...plain, season: ctx.trackerSeason, episode: ctx.trackerEpisode, absolute: ctx.trackerEpisode };
+  const otherSeason = !!p.seasons && !p.seasons.includes(ctx.trackerSeason);
+  if (!otherSeason && hasEpisodePlain(p, tracker)) return true;
+  // "S01 [1-57 из 63]", "3 сезон [38-50]": a one-season tag over an absolute range
+  // (past tracker season 1, so the numbers cannot be per season).
+  const r = p.episodeRange;
+  const one = !!p.seasons && p.seasons.length === 1 && (p.seasons[0] === 1 || p.seasons[0] === ctx.trackerSeason);
+  return ctx.trackerSeason > 1 && one && !p.sxeRange && !!r && ctx.absolute >= r[0] && ctx.absolute <= r[1];
+}
+
+function hasEpisodePlain(p, ctx) {
   const wantEp = ctx.episode ?? null;
   const wantAbs = ctx.absolute ?? ctx.episode ?? null;
   const inRange = (n) => n != null && p.episodeRange && n >= p.episodeRange[0] && n <= p.episodeRange[1];
@@ -300,4 +326,41 @@ export function selectTorrent(results, ctx) {
   scored.sort((a, b) => (a.rejected ? 1 : 0) - (b.rejected ? 1 : 0) || b.score - a.score);
   const top = scored.find((s) => !s.rejected);
   return { chosen: top ? top.result : null, scored };
+}
+
+// ---------- tracker seasons inferred from the releases ----------
+
+// Total episode count a title states: "1-6 из 13", "[13 из 13]", "(1-4 of 10)".
+function statedTotal(t) {
+  const m = String(t || '').match(/(?<![\p{L}\d])(?:\d{1,4}\s*-\s*)?\d{1,4}\s*(?:из|of)\s*(\d{1,4})(?!\d)/iu);
+  return m ? +m[1] : null;
+}
+
+// Releases of a single-season anime that carry tracker season tags ->
+// SeasonMap [{season, start, count, episodes}]: per season the largest stated
+// total ("из N"), cumulative offsets for the absolute numbers. Seasons 1..K
+// without a gap; a season starting past `total` (TMDB's episode count) is dropped.
+// names: relevance names (releases of other shows ignored). null below 2 seasons.
+export function inferSeasonMap(results, { names, total } = {}) {
+  const totals = new Map();
+  for (const r of results || []) {
+    if (!r || !isRelevant(r.Title, names)) continue;
+    const p = parseTitle(r.Title);
+    const seasons = p.seasons || (p.sxeRange ? [p.sxeRange.season] : null);
+    if (!seasons || seasons.length !== 1) continue;
+    const n = statedTotal(r.Title);
+    if (!(n > 0) || n > 500) continue;
+    totals.set(seasons[0], Math.max(totals.get(seasons[0]) || 0, n));
+  }
+  const map = [];
+  let start = 1;
+  for (let season = 1; totals.has(season); season++) {
+    if (total > 0 && start > total) break;
+    const count = totals.get(season);
+    const episodes = [];
+    for (let i = 0; i < count; i++) episodes.push(start + i);
+    map.push({ season, start, count, episodes });
+    start += count;
+  }
+  return map.length >= 2 ? map : null;
 }

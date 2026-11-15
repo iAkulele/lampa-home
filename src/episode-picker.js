@@ -2,7 +2,7 @@
 // with the computed episode, the aired episodes of its season with watched marks,
 // another season and the native torrents list.
 import { lampa, tmdbGet } from './lampa.js';
-import { episodeStatus } from './episodes.js';
+import { episodeStatus, trackerPosition } from './episodes.js';
 import { todayIso } from './tmdb.js';
 
 const WATCHED_PERCENT = 85;
@@ -55,10 +55,15 @@ export function inProgressEpisodes(season, numbers, view) {
   return out;
 }
 
-const episodeTitle = (ep) => `Серия ${ep.episode_number}` + (ep.name ? ` — ${ep.name}` : '');
+// A mapped episode (tracker season, ep.absolute set): «Серия 3», the absolute
+// number and the name in the subtitle («#40 · name»).
+const episodeTitle = (ep) => `Серия ${ep.episode_number}` + (ep.name && ep.absolute == null ? ` — ${ep.name}` : '');
+const mappedSubtitle = (ep) => [`#${ep.absolute}`, ep.name || formatDate(ep.air_date)].filter(Boolean).join(' · ');
 
 // -> [{title, subtitle, season, episode, kind, selected}]; kind: 'continue' (the
 // computed target, selected), 'episode', 'season' (another season), 'list' (native list).
+// Tracker seasons (episodes from mappedEpisodes): season/episode are the tracker
+// ones, items also carry `absolute`; watchedSet / inProgress are keyed by absolute.
 export function pickerItems({ season, target, episodes, watchedSet, inProgress, today, seasonsCount = 1 }) {
   const aired = (episodes || []).filter((ep) => ep && ep.episode_number > 0 && isAired(ep, today));
   const watched = watchedSet || new Set();
@@ -69,21 +74,27 @@ export function pickerItems({ season, target, episodes, watchedSet, inProgress, 
     : null;
   if (target && target.season === season) {
     const ep = aired.find((e) => e.episode_number === target.episode);
-    items.push({
-      title: `Продолжить: серия ${target.episode}`, subtitle: (ep && ep.name) || '',
+    const item = {
+      title: `Продолжить: серия ${target.episode}`, subtitle: (ep && (ep.absolute != null ? mappedSubtitle(ep) : ep.name)) || '',
       season, episode: target.episode, kind: 'continue', selected: true,
-    });
+    };
+    if (ep && ep.absolute != null) item.absolute = ep.absolute;
+    items.push(item);
   }
   if (other) items.push(other);
   for (const ep of aired) {
     const n = ep.episode_number;
+    const mapped = ep.absolute != null;
+    const key = mapped ? ep.absolute : n;
     let prefix = '';
-    if (progress[n] != null) prefix = `▶ ${Math.max(1, Math.round(progress[n]))}% `;
-    else if (watched.has(n)) prefix = '✓ ';
-    items.push({
-      title: prefix + episodeTitle(ep), subtitle: formatDate(ep.air_date),
+    if (progress[key] != null) prefix = `▶ ${Math.max(1, Math.round(progress[key]))}% `;
+    else if (watched.has(key)) prefix = '✓ ';
+    const item = {
+      title: prefix + episodeTitle(ep), subtitle: mapped ? mappedSubtitle(ep) : formatDate(ep.air_date),
       season, episode: n, kind: 'episode', selected: false,
-    });
+    };
+    if (mapped) item.absolute = ep.absolute;
+    items.push(item);
   }
   items.push({ title: 'Все раздачи', subtitle: '', season, episode: null, kind: 'list', selected: false });
   return items;
@@ -113,6 +124,48 @@ export function seasonItems(tv, current, today) {
         season: s.season_number, selected: s.season_number === current,
       };
     });
+}
+
+// ---------- tracker seasons (SeasonMap of a single-season anime) ----------
+
+// TMDB season 1 episodes of tracker season `season`, renumbered 1..n with the
+// absolute number kept in `absolute`. Missing TMDB episodes: no name, aired up to
+// airedAbs (the last aired absolute episode).
+export function mappedEpisodes(map, season, tmdbEpisodes, airedAbs) {
+  const s = (map || []).find((x) => x && x.season === season);
+  if (!s) return [];
+  const byNumber = new Map((tmdbEpisodes || []).filter(Boolean).map((e) => [e.episode_number, e]));
+  const list = Array.isArray(s.episodes) && s.episodes.length ? s.episodes : Array.from({ length: s.count }, (_, i) => s.start + i);
+  return list.map((abs, i) => {
+    const e = byNumber.get(abs);
+    const base = e || { name: '', air_date: null, aired: airedAbs == null || abs <= airedAbs };
+    return { ...base, episode_number: i + 1, season_number: season, absolute: abs };
+  });
+}
+
+// Tracker seasons that have started airing (first episode <= airedAbs):
+// [{title, subtitle, season, selected}].
+export function mappedSeasonItems(map, current, airedAbs) {
+  return (map || [])
+    .filter((s) => s && s.count > 0 && (airedAbs == null || s.start <= airedAbs))
+    .map((s) => {
+      const list = s.episodes && s.episodes.length ? s.episodes : Array.from({ length: s.count }, (_, i) => s.start + i);
+      const last = list[list.length - 1];
+      const out = airedAbs == null ? s.count : list.filter((a) => a <= airedAbs).length;
+      const state = out < s.count ? `выходит, вышло ${out} из ${s.count}` : 'вышел полностью';
+      return {
+        title: `${s.season === current ? '✓ ' : ''}Сезон ${s.season} · ${episodesWord(s.count)}`,
+        subtitle: `${state} · #${s.start}–#${last}`,
+        season: s.season, selected: s.season === current,
+      };
+    });
+}
+
+// Tracker {season, episode} of a TMDB target (season 1, absolute) or null.
+export function mappedTarget(map, target) {
+  if (!target || target.season !== 1) return null;
+  const pos = trackerPosition(map, target.episode);
+  return pos ? { season: pos.season, episode: pos.episode } : null;
 }
 
 // Episodes of a season known to have aired when TMDB's season list is missing.
@@ -150,9 +203,70 @@ function seasonEpisodes(tv, season, today) {
 }
 
 // Shows the picker. opts: {title (show name), tv, target {season, episode},
-// progress (lh_progress of the card), view(season, episode) -> Lampa timeline}.
+// progress (lh_progress of the card), view(season, episode) -> Lampa timeline,
+// seasonMap (tracker seasons of a single-season anime, or null)}.
 // Resolves {season, episode}, 'list' («Все раздачи») or null (Back).
-export function askEpisode({ title, tv, target, progress, view }) {
+export function askEpisode(opts) {
+  const tracker = opts.seasonMap ? mappedTarget(opts.seasonMap, opts.target) : null;
+  return tracker ? askMapped(opts, tracker) : askPlain(opts);
+}
+
+// Picker in tracker seasons; resolves {season: 1, episode: absolute}, 'list' or null.
+function askMapped({ title, tv, target, progress, view, seasonMap }, tracker) {
+  const L = lampa();
+  const today = todayIso();
+  const name = L.Controller.enabled().name;
+  const enabled = !name || name === 'select' || name === 'loading' ? 'content' : name;
+  const status = tv ? episodeStatus(tv, today) : null;
+  const airedAbs = status && status.season === 1 ? status.aired : null;
+  const seasons = mappedSeasonItems(seasonMap, tracker.season, airedAbs);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      L.Controller.toggle(enabled);
+      resolve(value);
+    };
+    const showSeasons = (current) => {
+      L.Select.show({
+        title: title || 'Сезон',
+        items: mappedSeasonItems(seasonMap, current, airedAbs),
+        onSelect: (a) => showEpisodes(a.season, false),
+        onBack: () => showEpisodes(current, current === tracker.season),
+      });
+    };
+    function showEpisodes(season, withTarget) {
+      seasonEpisodes(tv || { id: 0 }, 1, today).then((tmdb) => {
+        if (done) return;
+        const episodes = mappedEpisodes(seasonMap, season, tmdb, airedAbs);
+        const numbers = episodes.map((e) => e.absolute);
+        const items = pickerItems({
+          season,
+          target: withTarget ? tracker : null,
+          episodes,
+          watchedSet: watchedEpisodes(1, numbers, progress, view),
+          inProgress: inProgressEpisodes(1, numbers, view),
+          today,
+          seasonsCount: seasons.length,
+        });
+        L.Select.show({
+          title: `${title ? title + ' · ' : ''}Сезон ${season}`,
+          items,
+          onSelect: (a) => {
+            if (a.kind === 'season') return showSeasons(season);
+            if (a.kind === 'list') return finish('list');
+            finish({ season: 1, episode: a.absolute });
+          },
+          onBack: () => (season === tracker.season ? finish(null) : showEpisodes(tracker.season, true)),
+        });
+      });
+    }
+    showEpisodes(tracker.season, true);
+  });
+}
+
+function askPlain({ title, tv, target, progress, view }) {
   const L = lampa();
   const today = todayIso();
   // Opened from the card's «...» menu the enabled one is that (closed) select.

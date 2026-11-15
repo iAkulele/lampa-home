@@ -139,7 +139,9 @@ export function searchParamsFor(card, ctx, parseLang, title, original) {
     lg_df: title + ' ' + original,
     lg_df_year: title + ' ' + original + ' ' + year,
   };
-  const s = ctx && ctx.kind !== 'movie' && Number.isInteger(ctx.season) && ctx.season >= 0 ? ctx.season : null;
+  // Tracker seasons of a single-season anime (ctx.seasonMap): no ' S01' — trackers
+  // tag those releases '3 сезон' or number them absolutely.
+  const s = ctx && ctx.kind !== 'movie' && !ctx.seasonMap && Number.isInteger(ctx.season) && ctx.season >= 0 ? ctx.season : null;
   const season = s == null ? '' : ' S' + (s < 10 ? '0' : '') + s;
   return {
     search: (combinations[parseLang] || original || title) + season,

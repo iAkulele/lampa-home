@@ -2,9 +2,9 @@
 // the player on the right file (next episode for series) with a playlist.
 import { lampa, store, storageField } from './lampa.js';
 import { LIMITS } from './config.js';
-import { selectTorrent, parseTitle } from './torrent-select.js';
-import { episodeStatus, nextEpisode, absoluteEpisode, parseEpisode } from './episodes.js';
-import { loadTv, todayIso } from './tmdb.js';
+import { selectTorrent, parseTitle, inferSeasonMap } from './torrent-select.js';
+import { episodeStatus, nextEpisode, absoluteEpisode, parseEpisode, trackerPosition } from './episodes.js';
+import { loadTv, todayIso, loadSeasonMap, isSingleSeason } from './tmdb.js';
 import { askEpisode } from './episode-picker.js';
 import {
   isLatinOrCyrillic, latinAltTitles, cyrillicAltTitles, queryTitles, firstQuery, followUpQueries, mergeResults, searchParamsFor,
@@ -92,6 +92,49 @@ export function titleHasSeason(title) {
   return !!(p.seasons || p.sxeRange || (p.episode && p.episode.season != null));
 }
 
+// ---------- tracker seasons (single-season anime split into seasons on trackers) ----------
+// ctx stays in TMDB terms (season 1, episode = absolute = TMDB's number) for
+// progress and Lampa's timeline; trackerSeason / trackerEpisode / trackerStart
+// (first absolute episode of that tracker season) serve release and file choice.
+
+// The tracker fields of a ctx or a stored entry ({} when there are none).
+export function trackerFields(o) {
+  if (!o || o.trackerSeason == null) return {};
+  return { trackerSeason: o.trackerSeason, trackerEpisode: o.trackerEpisode, trackerStart: o.trackerStart };
+}
+
+// ctx with the tracker position of its absolute episode in map. keepMap: the
+// map came from TMDB before the search (the query then goes without a season).
+export function withTracker(ctx, map, keepMap = true) {
+  if (!ctx || !map) return ctx;
+  const { trackerSeason, trackerEpisode, trackerStart, ...rest } = ctx;
+  const out = keepMap ? { ...rest, seasonMap: map } : rest;
+  const pos = trackerPosition(map, ctx.absolute);
+  return pos ? { ...out, trackerSeason: pos.season, trackerEpisode: pos.episode, trackerStart: pos.start } : out;
+}
+
+// Single-season anime without a TMDB episode group: tracker seasons inferred
+// from the season-tagged releases themselves (ctx.inferTotal: TMDB's count).
+export function inferTracker(ctx, results, names) {
+  if (!ctx || ctx.trackerSeason != null || ctx.seasonMap || !(ctx.inferTotal > 0)) return ctx;
+  const map = inferSeasonMap(results, { names, total: ctx.inferTotal });
+  return map ? withTracker(ctx, map, false) : ctx;
+}
+
+// Absolute (TMDB) number of a playlist episode of a tracker-season pack:
+// per-season numbers 1..n map to trackerStart.., absolute ones stay.
+export function absoluteInPack(episode, ctx) {
+  if (!(episode > 0) || !ctx || !(ctx.trackerStart > 0)) return episode;
+  return ctx.trackerStart > 1 && episode >= ctx.trackerStart ? episode : ctx.trackerStart - 1 + episode;
+}
+
+// The picked file is numbered within its tracker season (03 for absolute 40).
+export function isTrackerPackFile(file, ctx) {
+  if (!file || !ctx || !(ctx.trackerStart > 0)) return false;
+  const n = parseEpisode(file.path).episode;
+  return n != null && n !== ctx.absolute && n === ctx.trackerEpisode;
+}
+
 // files: [{id, path, length}]; infos (optional): [{id, season, episode, defaultSeason}]
 // as Lampa's Torserver.parse sees them (it also reads season folders);
 // defaultSeason: no season marker in the path, `season` is Lampa's guess.
@@ -99,6 +142,19 @@ export function titleHasSeason(title) {
 export function pickFile(files, ctx, infos) {
   const videos = (files || []).filter(isVideo);
   if (!videos.length) return null;
+  if (ctx.trackerSeason != null && ctx.kind !== 'movie') {
+    // Tracker S03E03 in the names; then the absolute number ("40" exists only in
+    // an absolutely numbered pack); then the per-season number of a season pack.
+    const { trackerSeason, trackerEpisode, trackerStart, ...plain } = ctx;
+    const sxe = videos.find((f) => {
+      const ep = parseEpisode(f.path);
+      return ep.season != null && ep.season === trackerSeason && ep.episode === trackerEpisode;
+    });
+    if (sxe) return sxe;
+    const abs = pickFile(videos, { ...plain, titleHasSeason: false }, infos);
+    if (abs) return abs;
+    return pickFile(videos, { ...plain, season: trackerSeason, episode: trackerEpisode, absolute: trackerEpisode, titleHasSeason: true }, infos);
+  }
   if (ctx.kind === 'movie') {
     return videos.reduce((best, f) => ((f.length || 0) > (best.length || 0) ? f : best));
   }
@@ -186,7 +242,11 @@ export async function tryCandidates(candidates, attempt, { cancelled = () => fal
 // the first episode of a season): a pack holding it means the target is not out yet.
 export function previousEpisodeCtx(ctx) {
   if (!ctx || ctx.kind === 'movie' || !(ctx.episode > 1)) return null;
-  return { ...ctx, episode: ctx.episode - 1, absolute: ctx.absolute > 1 ? ctx.absolute - 1 : ctx.absolute };
+  const prev = { ...ctx, episode: ctx.episode - 1, absolute: ctx.absolute > 1 ? ctx.absolute - 1 : ctx.absolute };
+  if (ctx.trackerSeason == null) return prev;
+  // The first episode of a tracker season: its predecessor is in another pack.
+  if (!(ctx.trackerEpisode > 1)) return null;
+  return { ...prev, trackerEpisode: ctx.trackerEpisode - 1 };
 }
 
 // Lampa's timeline entry of the stored episode: still unfinished -> play it again.
@@ -314,7 +374,7 @@ const resultsCache = new Map();
 // Latin alternative title for anime or when Q1 found little.
 // -> {results, names (for selectTorrent's relevance check), params (Q1)}.
 export async function findReleases(movie, ctx, job) {
-  const key = [movie.id, ctx.kind, ctx.season].join(':');
+  const key = [movie.id, ctx.kind, ctx.seasonMap ? 'map' : ctx.season].join(':');
   const hit = resultsCache.get(key);
   if (hit && Date.now() - hit.at < RESULTS_TTL_MS) return hit.value;
 
@@ -424,9 +484,18 @@ export function fileInfos(files, movie) {
 }
 
 // Playlist items shaped like list() in Lampa's interaction/torrent.js.
-function buildPlaylist(files, movie, hash) {
+// A tracker-season pack (ctx.trackerStart) is renumbered to TMDB's season 1 /
+// absolute episodes: Lampa's timeline marks and lh_progress use those.
+function buildPlaylist(files, movie, hash, ctx) {
   const L = lampa();
-  return parsePlays(files, movie).map(({ file, info }) => {
+  const tracker = !!ctx && ctx.trackerStart > 0;
+  const title = movie.original_title || movie.original_name || '';
+  return parsePlays(files, movie).map(({ file, info: parsed }) => {
+    let info = parsed;
+    if (tracker && info.episode > 0) {
+      const episode = absoluteInPack(info.episode, ctx);
+      info = { ...info, season: 1, episode, hash: L.Utils.hash(timelineHashString(1, episode, title)) };
+    }
     const link = info.by_title && (!info.serial || info.episode) ? L.Timeline.link(movie, info.season, info.episode) : null;
     const timeline = L.Timeline.view(info.hash, link);
     if (movie.runtime) timeline.duration = movie.runtime * 60;
@@ -510,8 +579,19 @@ export async function resolveTarget(card) {
     if (status.aired >= 1) target = { season: status.season, episode: status.aired };
     else if (progress) target = { season: progress.season, episode: progress.episode };
   }
-  const ctx = { kind, season: target.season, episode: target.episode, absolute: absoluteEpisode(seasons, target.season, target.episode) };
-  return { kind, ctx, movie, tv: details };
+  let ctx = { kind, season: target.season, episode: target.episode, absolute: absoluteEpisode(seasons, target.season, target.episode) };
+  // Single-season anime: the trackers may split it into seasons (TMDB episode
+  // group first; without one, inferred from the releases after the search).
+  let seasonMap = null;
+  if (kind === 'anime' && details && isSingleSeason(details)) {
+    seasonMap = await loadSeasonMap(card.id, details);
+    if (seasonMap) ctx = withTracker(ctx, seasonMap);
+    else {
+      const s1 = (details.seasons || []).find((s) => s && s.season_number === 1);
+      ctx = { ...ctx, inferTotal: (s1 && s1.episode_count) || (status && status.total) || 0 };
+    }
+  }
+  return { kind, ctx, movie, tv: details, seasonMap };
 }
 
 // «Спрашивать серию при запуске» (lh_ask_episode, on by default).
@@ -519,7 +599,7 @@ export const asksEpisode = (ctx) => !!ctx && ctx.kind !== 'movie' && storageFiel
 
 // Episode picker for a resolved series target -> the ctx to search for, 'list'
 // («Все раздачи») or null (Back). The loader must be stopped before.
-export async function chooseEpisode(card, { movie, ctx, tv }) {
+export async function chooseEpisode(card, { movie, ctx, tv, seasonMap }) {
   const seasons = (tv && tv.seasons) || card.seasons || [];
   const picked = await askEpisode({
     title: movie.title || movie.name || card.title || card.name || '',
@@ -527,9 +607,11 @@ export async function chooseEpisode(card, { movie, ctx, tv }) {
     target: { season: ctx.season, episode: ctx.episode },
     progress: store.progress.get(card.id),
     view: timelineOf(movie),
+    seasonMap,
   });
   if (!picked || picked === 'list') return picked;
-  return { ...ctx, season: picked.season, episode: picked.episode, absolute: absoluteEpisode(seasons, picked.season, picked.episode) };
+  const next = { ...ctx, season: picked.season, episode: picked.episode, absolute: absoluteEpisode(seasons, picked.season, picked.episode) };
+  return seasonMap ? withTracker(next, seasonMap) : next;
 }
 
 // One play attempt at a time; Back on the loader cancels it (onCancel runs first).
@@ -573,9 +655,9 @@ async function playFiles(job, card, movie, ctx, maxTries, filesText = MSG.files)
   const files = await pollFiles(job.hash, job, maxTries);
   if (job.cancelled || !files) return 'cancelled';
 
-  const playlist = buildPlaylist(files, movie, job.hash);
   const infos = ctx.index != null ? null : fileInfos(files, movie);
   const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, infos);
+  const playlist = buildPlaylist(files, movie, job.hash, isTrackerPackFile(file, ctx) ? ctx : null);
   const element = file && playlist.find((p) => p.id === file.id);
   if (!element) {
     // The episode before the target is there: the target is just not released yet.
@@ -653,6 +735,7 @@ export async function run(card) {
     if (job.cancelled) return;
     // The native list opens on the query that worked, with Lampa's own card.
     params = { ...params, search: found.params.search };
+    ctx = inferTracker(ctx, found.results, found.names);
     const candidates = nextCandidates(selectTorrent(found.results, { ...ctx, names: found.names }).scored);
     if (!candidates.length) {
       finish();

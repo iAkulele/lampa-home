@@ -74,3 +74,24 @@ export function parseEpisode(filename) {
 
   return result(null, null, null);
 }
+
+// ---------- tracker seasons (single-season anime, absolute numbering on TMDB) ----------
+
+// SeasonMap: [{season, start, count, episodes: [absolute...]}], tracker season
+// order. -> {season, episode, start, count} of an absolute episode, or null.
+export function trackerPosition(map, absolute) {
+  if (!Array.isArray(map) || !(absolute > 0)) return null;
+  for (const s of map) {
+    const list = Array.isArray(s.episodes) && s.episodes.length ? s.episodes : null;
+    const i = list ? list.indexOf(absolute) : absolute - s.start;
+    if (list ? i >= 0 : i >= 0 && i < s.count) return { season: s.season, episode: i + 1, start: s.start, count: s.count };
+  }
+  return null;
+}
+
+// Absolute episode of tracker season/episode; null when outside the map.
+export function absoluteOf(map, season, episode) {
+  const s = (map || []).find((x) => x && x.season === season);
+  if (!s || !(episode >= 1) || episode > s.count) return null;
+  return Array.isArray(s.episodes) && s.episodes[episode - 1] != null ? s.episodes[episode - 1] : s.start + episode - 1;
+}

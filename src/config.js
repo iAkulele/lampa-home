@@ -5,6 +5,7 @@ export const STORAGE_KEYS = {
   progress: 'lh_progress',
   seen: 'lh_seen',
   tvcache: 'lh_tvcache',
+  seasonmap: 'lh_seasonmap',
   notifyAt: 'lh_notify_at',
   filters: 'lh_filters',
   preload: 'lh_preload',
