@@ -254,7 +254,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
     notifyAt: "lh_notify_at",
     filters: "lh_filters",
     preload: "lh_preload",
-    settings: "lh_settings"
+    settings: "lh_settings",
+    rows: "lh_rows"
   };
   var SIZE_FLOORS = {
     movie: { 2160: 15 * 1024 ** 3, 1080: 6 * 1024 ** 3 }
@@ -311,517 +312,6 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var SUB_WORD = "(?:sub(?:s|titles?)?(?!\\p{L})|\u0441\u0443\u0431\u0442\u0438\u0442\u0440\\p{L}*)";
   var SUB_LANG = "(?:(?:rus|eng|ukr|jap)\\p{L}*|\u0440\u0443\u0441\\p{L}*|\u0430\u043D\u0433\u043B\\p{L}*|\u0443\u043A\u0440\\p{L}*)";
   var SUBTITLE_PHRASES = "(?<![\\p{L}\\d])(?:rus|\u0440\u0443\u0441\\p{L}*)[\\s.]*" + SUB_WORD + "|(?<![\\p{L}\\d])" + SUB_WORD + "[\\s:.(\\-]*(?:" + SUB_LANG + "[\\s,+/.]*)+\\)?";
-
-  // src/store.js
-  var MAX_ENTRIES = 200;
-  var DEFAULT_FILTER = { genre: null, year: null, sort: "new" };
-  function createStore(storage2, now = () => Date.now()) {
-    const read = (key) => {
-      const v = storage2.get(key, {});
-      return v && typeof v === "object" ? v : {};
-    };
-    const progress = {
-      get(cardId) {
-        return read(STORAGE_KEYS.progress)[cardId] || null;
-      },
-      set(cardId, { season, episode, hash }) {
-        const all = read(STORAGE_KEYS.progress);
-        all[cardId] = { season, episode, hash, updated: now() };
-        storage2.set(STORAGE_KEYS.progress, all);
-      },
-      clear(cardId) {
-        const all = read(STORAGE_KEYS.progress);
-        delete all[cardId];
-        storage2.set(STORAGE_KEYS.progress, all);
-      }
-    };
-    const seen = {
-      get(tvId) {
-        const v = read(STORAGE_KEYS.seen)[tvId];
-        return typeof v === "number" ? v : null;
-      },
-      set(tvId, aired) {
-        const all = read(STORAGE_KEYS.seen);
-        all[tvId] = aired;
-        storage2.set(STORAGE_KEYS.seen, all);
-      }
-    };
-    const tvcache = {
-      get(tvId) {
-        const e = read(STORAGE_KEYS.tvcache)[tvId];
-        if (!e || now() - e.checked > LIMITS.tvCacheMs) return null;
-        return e;
-      },
-      set(tvId, status2) {
-        const all = read(STORAGE_KEYS.tvcache);
-        all[tvId] = { status: status2, checked: now() };
-        storage2.set(STORAGE_KEYS.tvcache, all);
-      }
-    };
-    const seasonmap = {
-      get(tvId) {
-        const e = read(STORAGE_KEYS.seasonmap)[tvId];
-        if (!e || now() - e.checked > LIMITS.tvCacheMs) return null;
-        return e;
-      },
-      set(tvId, map) {
-        const all = read(STORAGE_KEYS.seasonmap);
-        all[tvId] = { map: map || null, checked: now() };
-        storage2.set(STORAGE_KEYS.seasonmap, all);
-      }
-    };
-    const notify = {
-      due() {
-        const at = storage2.get(STORAGE_KEYS.notifyAt, 0);
-        return now() - (typeof at === "number" ? at : 0) >= LIMITS.notifyEveryMs;
-      },
-      mark() {
-        storage2.set(STORAGE_KEYS.notifyAt, now());
-      }
-    };
-    const filters = {
-      get(kind) {
-        return { ...DEFAULT_FILTER, ...read(STORAGE_KEYS.filters)[kind] || {} };
-      },
-      set(kind, f) {
-        var _a, _b, _c;
-        const all = read(STORAGE_KEYS.filters);
-        all[kind] = { genre: (_a = f.genre) != null ? _a : null, year: (_b = f.year) != null ? _b : null, sort: (_c = f.sort) != null ? _c : "new" };
-        storage2.set(STORAGE_KEYS.filters, all);
-      }
-    };
-    const preload2 = {
-      get(cardId) {
-        return read(STORAGE_KEYS.preload)[cardId] || null;
-      },
-      set(cardId, data) {
-        const all = read(STORAGE_KEYS.preload);
-        all[cardId] = data;
-        storage2.set(STORAGE_KEYS.preload, all);
-      },
-      remove(cardId) {
-        const all = read(STORAGE_KEYS.preload);
-        if (!(cardId in all)) return;
-        delete all[cardId];
-        storage2.set(STORAGE_KEYS.preload, all);
-      },
-      // Overwrites the whole list (the local copy of TorrServer's list).
-      replace(map) {
-        storage2.set(STORAGE_KEYS.preload, map && typeof map === "object" ? map : {});
-      },
-      all() {
-        const all = read(STORAGE_KEYS.preload);
-        return Object.keys(all).map((cardId) => ({ cardId, ...all[cardId] })).sort((a, b) => (b.added || 0) - (a.added || 0));
-      }
-    };
-    function trim(key, field) {
-      const all = read(key);
-      const ids = Object.keys(all);
-      const valid = ids.filter((id) => all[id] && typeof all[id] === "object");
-      if (ids.length <= MAX_ENTRIES && valid.length === ids.length) return;
-      valid.sort((a, b) => (Number(all[b][field]) || 0) - (Number(all[a][field]) || 0));
-      const kept = {};
-      for (const id of valid.slice(0, MAX_ENTRIES)) kept[id] = all[id];
-      storage2.set(key, kept);
-    }
-    function prune() {
-      trim(STORAGE_KEYS.progress, "updated");
-      trim(STORAGE_KEYS.tvcache, "checked");
-      trim(STORAGE_KEYS.seasonmap, "checked");
-    }
-    return { progress, seen, tvcache, seasonmap, notify, filters, preload: preload2, prune };
-  }
-
-  // src/lampa.js
-  var storage = {
-    get: (key, empty) => window.Lampa.Storage.get(key, empty),
-    set: (key, value) => window.Lampa.Storage.set(key, value)
-  };
-  var noty = (text) => window.Lampa.Noty.show(text);
-  var tmdbGet = (url, params, ok, fail3) => window.Lampa.Api.sources.tmdb.get(url, params, ok, fail3);
-  var favoriteGet = (params) => window.Lampa.Favorite.get(params) || [];
-  var lampa = () => window.Lampa;
-  var store = createStore(storage);
-  var storageField = (name) => window.Lampa.Storage.field(name);
-
-  // src/episodes.js
-  var realSeasons = (seasons) => (seasons || []).filter((s) => s && s.season_number > 0).sort((a, b) => a.season_number - b.season_number);
-  var findSeason = (seasons, n) => realSeasons(seasons).find((s) => s.season_number === n);
-  function episodeStatus(tv, today) {
-    const list = realSeasons(tv && tv.seasons);
-    const last = tv && tv.last_episode_to_air;
-    const airing = !!tv && (tv.status === "Returning Series" || !!tv.next_episode_to_air);
-    if (!last) {
-      const s = list[list.length - 1];
-      const total2 = s ? s.episode_count : 0;
-      return { season: s ? s.season_number : 1, aired: total2, total: total2, airing };
-    }
-    const season = last.season_number;
-    const info = findSeason(list, season);
-    const total = info ? info.episode_count : last.episode_number;
-    const future = !!last.air_date && !!today && last.air_date > today;
-    const aired = future ? Math.max(0, last.episode_number - 1) : last.episode_number;
-    return { season, aired, total, airing };
-  }
-  function absoluteEpisode(seasons, season, episode) {
-    let sum = 0;
-    for (const s of realSeasons(seasons)) {
-      if (s.season_number < season) sum += s.episode_count;
-    }
-    return sum + episode;
-  }
-  function nextEpisode(progress, seasons) {
-    if (!progress) return { season: 1, episode: 1 };
-    const cur = findSeason(seasons, progress.season);
-    if (cur && progress.episode < cur.episode_count) {
-      return { season: progress.season, episode: progress.episode + 1 };
-    }
-    if (findSeason(seasons, progress.season + 1)) {
-      return { season: progress.season + 1, episode: 1 };
-    }
-    return { season: progress.season, episode: progress.episode };
-  }
-  var NOT_EPISODE_NUMBERS = /* @__PURE__ */ new Set([360, 480, 576, 1440, 2160, 4320]);
-  var RESOLUTIONS = /* @__PURE__ */ new Set([...NOT_EPISODE_NUMBERS, 720, 1080]);
-  function parseEpisode(filename) {
-    const result = (season, episode, absolute) => ({ season, episode, absolute });
-    let name = String(filename || "").replace(/^.*[\\/]/, "");
-    name = name.replace(/(?<![0-9A-Za-z])(?:19|20)\d{2}(?![0-9A-Za-z])/g, " ");
-    let m = name.match(/(?<![0-9A-Za-z])s(\d{1,2})[ ._-]?e(\d{1,4})(?!\d)/i);
-    if (m) return result(+m[1], +m[2], null);
-    m = name.match(/(?<![0-9A-Za-z])(\d{1,2})x(\d{1,4})(?![0-9A-Za-z])/i);
-    if (m) return result(+m[1], +m[2], null);
-    m = name.match(/сезон\s*(\d{1,2})\D{0,10}?сери[яи]\s*(\d{1,4})/i);
-    if (m) return result(+m[1], +m[2], null);
-    m = name.match(/(?<![0-9A-Za-z])(?:ep(?:isode)?|e)[ ._-]?(\d{1,4})(?!\d)/i) || name.match(/сери[яи][ ._-]?(\d{1,4})(?!\d)/i);
-    if (m) return result(null, +m[1], +m[1]);
-    m = name.match(/\[(\d{1,4})\]/);
-    if (m && !RESOLUTIONS.has(+m[1])) return result(null, +m[1], +m[1]);
-    m = name.match(/\s-\s(\d{1,4})(?=\s|\.|\[|$)/);
-    if (m && !NOT_EPISODE_NUMBERS.has(+m[1])) return result(null, +m[1], +m[1]);
-    return result(null, null, null);
-  }
-  function trackerPosition(map, absolute) {
-    if (!Array.isArray(map) || !(absolute > 0)) return null;
-    for (const s of map) {
-      const list = Array.isArray(s.episodes) && s.episodes.length ? s.episodes : null;
-      const i = list ? list.indexOf(absolute) : absolute - s.start;
-      if (list ? i >= 0 : i >= 0 && i < s.count) return { season: s.season, episode: i + 1, start: s.start, count: s.count };
-    }
-    return null;
-  }
-  function absoluteOf(map, season, episode) {
-    const s = (map || []).find((x) => x && x.season === season);
-    if (!s || !(episode >= 1) || episode > s.count) return null;
-    return Array.isArray(s.episodes) && s.episodes[episode - 1] != null ? s.episodes[episode - 1] : s.start + episode - 1;
-  }
-
-  // src/torrent-select.js
-  var GiB = 1024 ** 3;
-  var re = (src) => new RegExp(src, "iu");
-  var RE_RUSSIAN = re(RUSSIAN_MARKERS);
-  var RE_SUBS = re(SUBTITLE_PHRASES);
-  var RE_SCREENER = re(SCREENER_MARKERS);
-  var RE_DV = re(DV_MARKERS);
-  var RE_DV_P5 = re(DV_P5_MARKERS);
-  var RE_HDR = re(HDR_MARKERS);
-  var RE_VOICE = re(VOICE_MARKERS);
-  var RE_EXT = re(EXT_AUDIO_MARKERS);
-  var RE_RAW = re(RAW_MARKERS);
-  var RE_SUBS_ONLY = re(SUBS_ONLY_MARKERS);
-  var RE_ANIME_STUDIO = re(ANIME_VOICE_STUDIOS);
-  var STUDIO_RES = Object.entries(VOICE_STUDIOS).map(([id, src]) => [id, re(src)]);
-  function detectStudio(title) {
-    for (const [id, rx] of STUDIO_RES) if (rx.test(title)) return id;
-    return null;
-  }
-  function detectResolution(t) {
-    if (/(?<![\d])2160\s*p?|\b4k\b|\buhd\b/i.test(t)) return 2160;
-    if (/(?<![\d])1080\s*[pi]?(?![\d])/i.test(t)) return 1080;
-    if (/(?<![\d])720\s*p?(?![\d])/i.test(t)) return 720;
-    if (/(?<![\d])(?:480|576)\s*p?(?![\d])/i.test(t)) return 480;
-    return null;
-  }
-  function detectAudio(t) {
-    if (/e-?ac-?3|\bddp/i.test(t)) return "eac3";
-    if (/(?<![a-z])ac-?3(?![a-z\d])|\bdd ?5\.1/i.test(t)) return "ac3";
-    if (/truehd/i.test(t)) return "truehd";
-    if (/\bdts/i.test(t)) return "dts";
-    if (/\baac/i.test(t)) return "aac";
-    return null;
-  }
-  function detectVoice(t, studio, audioText) {
-    if (studio === "lostfilm" || studio === "hdrezka" || studio === "anidub") return studio;
-    if (studio) return "other";
-    if (/дубляж|(?<![\p{L}\d])dub(?!bed)/iu.test(t)) return "dub";
-    if (/\bmvo\b|многоголос/i.test(t)) return "mvo";
-    return RE_RUSSIAN.test(audioText) ? "other" : null;
-  }
-  function detectSeasons(t) {
-    const out = /* @__PURE__ */ new Set();
-    const add = (a, b) => {
-      for (let s = a; s <= b && s - a < 60; s++) out.add(s);
-    };
-    let m;
-    const sx = /(?<![\p{L}\d])s(\d{1,2})(?:\s*-\s*s?(\d{1,2}))?(?![\d])(?!e\d)/giu;
-    while (m = sx.exec(t)) add(+m[1], m[2] ? +m[2] : +m[1]);
-    const en = /(?<![\p{L}\d])season\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?(?![\d])/giu;
-    while (m = en.exec(t)) add(+m[1], m[2] ? +m[2] : +m[1]);
-    const nth = /(?<![\p{L}\d])(\d{1,2})(?:st|nd|rd|th)\s+season/giu;
-    while (m = nth.exec(t)) add(+m[1], +m[1]);
-    const tv = /(?<![\p{L}\d])(?:tv|тв)-?(\d{1,2})(?![\d])/giu;
-    while (m = tv.exec(t)) add(+m[1], +m[1]);
-    const before = /(?<![\p{L}\d])(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*сезон/giu;
-    let prefixed = false;
-    while (m = before.exec(t)) {
-      prefixed = true;
-      add(+m[1], m[2] ? +m[2] : +m[1]);
-    }
-    const ru = /сезон[ы:]*\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?/giu;
-    while (!prefixed && (m = ru.exec(t))) add(+m[1], m[2] ? +m[2] : +m[1]);
-    return out.size ? [...out].sort((a, b) => a - b) : null;
-  }
-  function detectEpisodeRange(t) {
-    const patterns = [
-      /(?<![\p{L}\d])e(\d{1,4})\s*-\s*e?(\d{1,4})(?!\d)/iu,
-      /\[\s*(\d{1,4})\s*-\s*(\d{1,4})\s*\]/,
-      /(\d{1,4})\s*-\s*(\d{1,4})\s*(?:of|из|серии|серий|episodes|eps)(?![\p{L}])/iu,
-      /(?:серии|серия|episodes?|eps?)[\s:]*(\d{1,4})\s*-\s*(\d{1,4})/iu
-    ];
-    for (const p of patterns) {
-      const m = t.match(p);
-      if (m && +m[1] <= +m[2] && +m[1] < 1900) return [+m[1], +m[2]];
-    }
-    return null;
-  }
-  function detectSxeRange(t) {
-    const m = t.match(/(?<![\p{L}\d])s(\d{1,2})[ ._-]?e(\d{1,4})\s*-\s*e?(\d{1,4})(?!\d)/iu);
-    return m && +m[2] <= +m[3] ? { season: +m[1], range: [+m[2], +m[3]] } : null;
-  }
-  function parseTitle(title) {
-    const t = String(title || "");
-    const audioText = t.replace(RE_SUBS, " ");
-    const studio = detectStudio(t);
-    const hdr = RE_HDR.test(t);
-    const dv = RE_DV.test(t);
-    const dvP5 = dv && RE_DV_P5.test(t);
-    const range = detectEpisodeRange(t);
-    const ep = parseEpisode(t);
-    return {
-      resolution: detectResolution(t),
-      screener: RE_SCREENER.test(t),
-      dvOnly: dv && (dvP5 || !hdr),
-      hdr,
-      russian: RE_RUSSIAN.test(audioText) || studio !== null,
-      voice: detectVoice(t, studio, audioText),
-      explicitVoice: studio !== null || RE_VOICE.test(audioText),
-      extAudio: RE_EXT.test(audioText),
-      raw: RE_RAW.test(t),
-      subsOnly: RE_SUBS_ONLY.test(t),
-      animeStudio: RE_ANIME_STUDIO.test(audioText),
-      studio,
-      audio: detectAudio(t),
-      seasons: detectSeasons(t),
-      episodeRange: range,
-      sxeRange: detectSxeRange(t),
-      episode: ep.episode == null ? null : ep,
-      total: statedTotal(t)
-    };
-  }
-  var seasonTagged = (p) => !!(p.seasons || p.sxeRange || p.episode && p.episode.season != null);
-  function hasEpisode(p, ctx) {
-    if (ctx.trackerSeason == null) return hasEpisodePlain(p, ctx);
-    const plain = { ...ctx, trackerSeason: null };
-    if (!seasonTagged(p)) {
-      if (!p.episodeRange && !p.episode && p.total > 0) return ctx.absolute <= p.total;
-      return hasEpisodePlain(p, plain);
-    }
-    const tracker = { ...plain, season: ctx.trackerSeason, episode: ctx.trackerEpisode, absolute: ctx.trackerEpisode };
-    const otherSeason = !!p.seasons && !p.seasons.includes(ctx.trackerSeason);
-    if (!otherSeason && hasEpisodePlain(p, tracker)) return true;
-    const r = p.episodeRange;
-    const one = !!p.seasons && p.seasons.length === 1 && (p.seasons[0] === 1 || p.seasons[0] === ctx.trackerSeason);
-    return ctx.trackerSeason > 1 && one && !p.sxeRange && !!r && ctx.absolute >= r[0] && ctx.absolute <= r[1];
-  }
-  function hasEpisodePlain(p, ctx) {
-    var _a, _b, _c;
-    const wantEp = (_a = ctx.episode) != null ? _a : null;
-    const wantAbs = (_c = (_b = ctx.absolute) != null ? _b : ctx.episode) != null ? _c : null;
-    const inRange = (n) => n != null && p.episodeRange && n >= p.episodeRange[0] && n <= p.episodeRange[1];
-    if (p.sxeRange) {
-      const [a, b] = p.sxeRange.range;
-      return p.sxeRange.season === ctx.season && wantEp >= a && wantEp <= b;
-    }
-    if (p.episode && p.episode.season == null && p.seasons && ctx.season != null && !p.seasons.includes(ctx.season)) return false;
-    if (p.episode && p.episode.season == null && p.episodeRange) return inRange(ctx.kind === "anime" ? wantAbs : wantEp);
-    if (p.episode) {
-      if (p.episode.season != null) {
-        return p.episode.season === ctx.season && p.episode.episode === wantEp;
-      }
-      return ctx.kind === "anime" ? p.episode.absolute === wantAbs : p.episode.absolute === wantEp;
-    }
-    if (p.seasons) {
-      if (ctx.season != null && !p.seasons.includes(ctx.season)) return false;
-      return p.episodeRange ? inRange(wantEp) : true;
-    }
-    if (p.episodeRange) return inRange(ctx.kind === "anime" ? wantAbs : wantEp);
-    return true;
-  }
-  var norm = (s) => String(s || "").toLowerCase().replace(/ё/g, "\u0435").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-  var SHORT_NAME = 8;
-  function containsName(title, name) {
-    const n = norm(name);
-    if (!n) return false;
-    const t = norm(title);
-    return n.length < SHORT_NAME ? (" " + t + " ").includes(" " + n + " ") : t.includes(n);
-  }
-  function isRelevant(title, names) {
-    const list = (names || []).filter((n) => norm(n));
-    if (!list.length) return true;
-    return list.some((n) => containsName(title, n));
-  }
-  var RU_LANG = /^(?:rus?|russian)$/i;
-  var UKR_LETTERS = /[іїєґ]|укр/i;
-  var UNKNOWN_LANG = /^(?:|und|unk|unknown|mis|mul|zxx)$/i;
-  function streamIsRussian(s) {
-    const tags = s && s.tags || {};
-    const lang = String(tags.language || "").trim();
-    if (RU_LANG.test(lang)) return true;
-    if (!UNKNOWN_LANG.test(lang)) return false;
-    const name = String(tags.title || "");
-    return /\p{Script=Cyrillic}/u.test(name) && !UKR_LETTERS.test(name) || /(?<![\p{L}])rus/iu.test(name);
-  }
-  function audioFromFfprobe(ffprobe) {
-    const audio = (Array.isArray(ffprobe) ? ffprobe : []).filter((s) => s && s.codec_type === "audio");
-    if (!audio.length) return "unknown";
-    if (audio.some(streamIsRussian)) return "ru";
-    return audio.every((s) => !UNKNOWN_LANG.test(String(s.tags && s.tags.language || "").trim())) ? "none" : "unknown";
-  }
-  function audioFromResult(result) {
-    const probe = audioFromFfprobe(result && result.ffprobe);
-    if (probe === "ru") return "ru";
-    const langs = Array.isArray(result && result.languages) ? result.languages.map(String) : [];
-    if (langs.some((l) => RU_LANG.test(l))) return "ru";
-    if (probe === "none" || langs.length) return "none";
-    return "unknown";
-  }
-  var cyrillic = (s) => /\p{Script=Cyrillic}/u.test(String(s || ""));
-  function classifyAudio(p, result, ctx) {
-    const anime = ctx.kind === "anime";
-    const title = String(result && result.Title || "");
-    const info = result && result.info;
-    const voices = info && Array.isArray(info.voices) ? info.voices.join(" ") : "";
-    const animeStudio = anime && (p.animeStudio || RE_ANIME_STUDIO.test(voices));
-    const out = (russian, voice, extra) => ({ russian, voice, studio: p.studio, penalty: 0, reason: null, ...extra });
-    if (anime && p.raw && !(p.explicitVoice || animeStudio)) return out(false, null, { reason: "raw" });
-    if (p.extAudio) return out(true, p.voice || "other", { penalty: SCORING.extAudioPenalty });
-    if (p.russian || animeStudio) return out(true, p.voice || "other");
-    const meta = audioFromResult(result);
-    if (meta === "ru") {
-      const studio = detectStudio(voices);
-      return out(true, detectVoice("", studio, "") || "other", { studio });
-    }
-    if (meta === "none") return out(false, null, { reason: "no-russian" });
-    const ruNames = (ctx.names || []).filter(cyrillic);
-    if (anime && !p.subsOnly && ruNames.some((n) => containsName(title, n))) {
-      return out(false, "unknown", { penalty: SCORING.unknownVoicePenalty });
-    }
-    return out(false, null, { reason: "no-russian" });
-  }
-  function rejectReason(p, result, ctx) {
-    if (!isRelevant(result.Title, ctx.names)) return "unrelated";
-    if (p.screener) return "screener";
-    if (p.dvOnly) return "dv-only";
-    if (p.audioReason) return p.audioReason;
-    if (ctx.kind === "movie" && Number(result.Size) > LIMITS.maxMovieBytes) return "oversize";
-    if ((ctx.kind === "tv" || ctx.kind === "anime") && !hasEpisode(p, ctx)) return "episode-missing";
-    return null;
-  }
-  function effectiveResolution(p, result, ctx) {
-    const floors = SIZE_FLOORS[ctx.kind];
-    const size = Number(result.Size) || 0;
-    if (!floors || !size) return p.resolution;
-    let res = p.resolution;
-    if (res === 2160 && size < floors[2160]) res = 1080;
-    if (res === 1080 && size < floors[1080]) res = "thin";
-    return res;
-  }
-  function score(p, result, ctx) {
-    const W = SCORING;
-    let quality = W.quality.unknown;
-    const res = effectiveResolution(p, result, ctx);
-    if (res === 720) quality = ctx.kind === "anime" ? W.quality.anime720 : W.quality[720];
-    else if (res) quality = W.quality[res];
-    const pref = VOICE_PREFERENCE[ctx.kind] || [];
-    const rank = pref.indexOf(p.studio);
-    let voice = 0;
-    if (rank === 0) voice = W.voiceFirst;
-    else if (rank === 1) voice = W.voiceSecond;
-    else if (p.russian) voice = W.voiceAnyRussian;
-    const audio = ["ac3", "aac", "eac3"].includes(p.audio) ? W.audioLossy : 0;
-    const seeders = Math.max(0, Number(result.Seeders) || 0);
-    let seeds = Math.min(W.seedsCap, Math.log2(seeders + 1) * W.seedsFactor);
-    if (seeders < W.deadSeeders) seeds -= W.deadPenalty;
-    const sizePenalty = (Number(result.Size) || 0) / GiB * W.sizePenaltyPerGiB;
-    return quality + voice + audio + seeds - sizePenalty - (p.audioPenalty || 0);
-  }
-  function selectTorrent(results, ctx) {
-    const scored = (results || []).map((result) => {
-      const title = parseTitle(result.Title);
-      const a = classifyAudio(title, result, ctx);
-      const p = { ...title, russian: a.russian, voice: a.voice, studio: a.studio, audioPenalty: a.penalty, audioReason: a.reason };
-      return { result, score: score(p, result, ctx), rejected: rejectReason(p, result, ctx), voice: p.voice };
-    });
-    scored.sort((a, b) => (a.rejected ? 1 : 0) - (b.rejected ? 1 : 0) || b.score - a.score);
-    const top = scored.find((s) => !s.rejected);
-    return { chosen: top ? top.result : null, scored };
-  }
-  function statedTotal(t) {
-    const m = String(t || "").match(/(?<![\p{L}\d])(?:\d{1,4}\s*-\s*)?\d{1,4}\s*(?:из|of)\s*(\d{1,4})(?!\d)/iu);
-    return m ? +m[1] : null;
-  }
-  function inferSeasonMap(results, { names, total } = {}) {
-    const totals = /* @__PURE__ */ new Map();
-    for (const r of results || []) {
-      if (!r || !isRelevant(r.Title, names)) continue;
-      const p = parseTitle(r.Title);
-      const seasons = p.seasons || (p.sxeRange ? [p.sxeRange.season] : null);
-      if (!seasons || seasons.length !== 1) continue;
-      const n = statedTotal(r.Title);
-      if (!(n > 0) || n > 500) continue;
-      totals.set(seasons[0], Math.max(totals.get(seasons[0]) || 0, n));
-    }
-    const map = [];
-    let start3 = 1;
-    for (let season = 1; totals.has(season); season++) {
-      if (total > 0 && start3 > total) break;
-      const count = totals.get(season);
-      const episodes = [];
-      for (let i = 0; i < count; i++) episodes.push(start3 + i);
-      map.push({ season, start: start3, count, episodes });
-      start3 += count;
-    }
-    return map.length >= 2 ? map : null;
-  }
-
-  // src/queue.js
-  function createQueue(limit) {
-    let active = 0;
-    const waiting = [];
-    const next = () => {
-      if (active >= limit || !waiting.length) return;
-      active++;
-      const { job, resolve, reject } = waiting.shift();
-      Promise.resolve().then(job).then(resolve, reject).finally(() => {
-        active--;
-        next();
-      });
-    };
-    return (job) => new Promise((resolve, reject) => {
-      waiting.push({ job, resolve, reject });
-      next();
-    });
-  }
 
   // src/tmdb-queries.js
   var GENRES_MOVIE = [
@@ -1144,6 +634,1156 @@ body:not(.no--animation) .lh-catalog .card--wide {
     return push;
   }
 
+  // src/rows.js
+  var CUSTOM_PREFIX = "custom:";
+  var CUSTOM_KINDS = ["movie", "tv", "cartoon", "anime"];
+  var KIND_WORDS = { movie: "\u0444\u0438\u043B\u044C\u043C\u044B", tv: "\u0441\u0435\u0440\u0438\u0430\u043B\u044B", cartoon: "\u043C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B", anime: "\u0430\u043D\u0438\u043C\u0435" };
+  var findGenre = (kind, genre) => genresFor(kind).find((g) => g.id === genre);
+  function normalizeRowsConfig(raw) {
+    const src = raw && typeof raw === "object" ? raw : {};
+    const disabled = (Array.isArray(src.disabled) ? src.disabled : []).filter((key, i, all) => ROWS.includes(key) && all.indexOf(key) === i);
+    const ids = /* @__PURE__ */ new Set();
+    const custom = [];
+    for (const r of Array.isArray(src.custom) ? src.custom : []) {
+      if (!r || typeof r.id !== "string" || !r.id || ids.has(r.id)) continue;
+      if (!CUSTOM_KINDS.includes(r.kind) || !findGenre(r.kind, r.genre)) continue;
+      ids.add(r.id);
+      custom.push({ id: r.id, kind: r.kind, genre: r.genre });
+    }
+    return { disabled, custom };
+  }
+  var customRowKey = (id) => CUSTOM_PREFIX + id;
+  function homeRows(cfg) {
+    const builtins = ROWS.filter((key) => isRowEnabled(cfg, key)).map((key) => ({ key }));
+    return builtins.concat(cfg.custom.map((custom) => ({ key: customRowKey(custom.id), custom })));
+  }
+  var isRowEnabled = (cfg, key) => !cfg.disabled.includes(key);
+  function toggleRow(cfg, key) {
+    const disabled = isRowEnabled(cfg, key) ? cfg.disabled.concat(key) : cfg.disabled.filter((k) => k !== key);
+    return { ...cfg, disabled };
+  }
+  var hasCustomRow = (cfg, kind, genre) => cfg.custom.some((r) => r.kind === kind && r.genre === genre);
+  function addCustomRow(cfg, kind, genre, id) {
+    if (hasCustomRow(cfg, kind, genre)) return cfg;
+    return { ...cfg, custom: cfg.custom.concat({ id, kind, genre }) };
+  }
+  function moveCustomRow(cfg, id, delta) {
+    const from = cfg.custom.findIndex((r) => r.id === id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= cfg.custom.length) return cfg;
+    const custom = cfg.custom.slice();
+    [custom[from], custom[to]] = [custom[to], custom[from]];
+    return { ...cfg, custom };
+  }
+  var removeCustomRow = (cfg, id) => ({ ...cfg, custom: cfg.custom.filter((r) => r.id !== id) });
+  var kindWord = (kind) => KIND_WORDS[kind] || kind;
+  function customRowTitle(row) {
+    const g = findGenre(row.kind, row.genre);
+    return `${g ? g.title : "\u0416\u0430\u043D\u0440"} \xB7 ${kindWord(row.kind)}`;
+  }
+  var customPreset = (row) => ({ genre: row.genre, year: null, sort: "new", lang: null });
+  var customRowQuery = (row, page, today) => catalogQuery(row.kind, customPreset(row), page, today);
+  var customRowKeeps = (kind) => (card) => hasRussianTitle(card) && !(kindHidesAnime(kind) && isAnimeCard(card));
+  var KIND_TITLES = { movie: "\u0424\u0438\u043B\u044C\u043C\u044B", tv: "\u0421\u0435\u0440\u0438\u0430\u043B\u044B", cartoon: "\u041C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B", anime: "\u0410\u043D\u0438\u043C\u0435" };
+  function editorItems(cfg) {
+    const items = [{ title: "\u0412\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0435 \u043B\u0435\u043D\u0442\u044B", separator: true }];
+    for (const key of ROWS) {
+      items.push({ title: rowTitle(key), checkbox: true, checked: isRowEnabled(cfg, key), lh: { type: "builtin", key } });
+    }
+    if (cfg.custom.length) {
+      items.push({ title: "\u0421\u0432\u043E\u0438 \u043B\u0435\u043D\u0442\u044B", separator: true });
+      for (const r of cfg.custom) items.push({ title: customRowTitle(r), lh: { type: "custom", id: r.id } });
+    }
+    items.push({ title: "+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043B\u0435\u043D\u0442\u0443 \u043F\u043E \u0436\u0430\u043D\u0440\u0443", lh: { type: "add" } });
+    return items;
+  }
+  function customActions(cfg, id) {
+    const i = cfg.custom.findIndex((r) => r.id === id);
+    const items = [];
+    if (i > 0) items.push({ title: "\u0412\u044B\u0448\u0435", action: "up" });
+    if (i >= 0 && i < cfg.custom.length - 1) items.push({ title: "\u041D\u0438\u0436\u0435", action: "down" });
+    items.push({ title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C", action: "remove" });
+    return items;
+  }
+  var kindItems = () => CUSTOM_KINDS.map((kind) => ({ title: KIND_TITLES[kind], kind }));
+  function genreItems(cfg, kind) {
+    return genresFor(kind).map((g) => {
+      const item = { title: g.title, genre: g.id };
+      if (hasCustomRow(cfg, kind, g.id)) Object.assign(item, { ghost: true, subtitle: "\u0423\u0436\u0435 \u043D\u0430 \u0433\u043B\u0430\u0432\u043D\u043E\u0439" });
+      return item;
+    });
+  }
+  function newRowId(now = Date.now(), rnd = Math.random) {
+    return now.toString(36) + Math.floor(rnd() * 1e6).toString(36);
+  }
+
+  // src/store.js
+  var MAX_ENTRIES = 200;
+  var DEFAULT_FILTER = { genre: null, year: null, sort: "new" };
+  function createStore(storage2, now = () => Date.now()) {
+    const read = (key) => {
+      const v = storage2.get(key, {});
+      return v && typeof v === "object" ? v : {};
+    };
+    const progress = {
+      get(cardId) {
+        return read(STORAGE_KEYS.progress)[cardId] || null;
+      },
+      set(cardId, { season, episode, hash }) {
+        const all = read(STORAGE_KEYS.progress);
+        all[cardId] = { season, episode, hash, updated: now() };
+        storage2.set(STORAGE_KEYS.progress, all);
+      },
+      clear(cardId) {
+        const all = read(STORAGE_KEYS.progress);
+        delete all[cardId];
+        storage2.set(STORAGE_KEYS.progress, all);
+      }
+    };
+    const seen = {
+      get(tvId) {
+        const v = read(STORAGE_KEYS.seen)[tvId];
+        return typeof v === "number" ? v : null;
+      },
+      set(tvId, aired) {
+        const all = read(STORAGE_KEYS.seen);
+        all[tvId] = aired;
+        storage2.set(STORAGE_KEYS.seen, all);
+      }
+    };
+    const tvcache = {
+      get(tvId) {
+        const e = read(STORAGE_KEYS.tvcache)[tvId];
+        if (!e || now() - e.checked > LIMITS.tvCacheMs) return null;
+        return e;
+      },
+      set(tvId, status2) {
+        const all = read(STORAGE_KEYS.tvcache);
+        all[tvId] = { status: status2, checked: now() };
+        storage2.set(STORAGE_KEYS.tvcache, all);
+      }
+    };
+    const seasonmap = {
+      get(tvId) {
+        const e = read(STORAGE_KEYS.seasonmap)[tvId];
+        if (!e || now() - e.checked > LIMITS.tvCacheMs) return null;
+        return e;
+      },
+      set(tvId, map) {
+        const all = read(STORAGE_KEYS.seasonmap);
+        all[tvId] = { map: map || null, checked: now() };
+        storage2.set(STORAGE_KEYS.seasonmap, all);
+      }
+    };
+    const notify = {
+      due() {
+        const at = storage2.get(STORAGE_KEYS.notifyAt, 0);
+        return now() - (typeof at === "number" ? at : 0) >= LIMITS.notifyEveryMs;
+      },
+      mark() {
+        storage2.set(STORAGE_KEYS.notifyAt, now());
+      }
+    };
+    const filters = {
+      get(kind) {
+        return { ...DEFAULT_FILTER, ...read(STORAGE_KEYS.filters)[kind] || {} };
+      },
+      set(kind, f) {
+        var _a, _b, _c;
+        const all = read(STORAGE_KEYS.filters);
+        all[kind] = { genre: (_a = f.genre) != null ? _a : null, year: (_b = f.year) != null ? _b : null, sort: (_c = f.sort) != null ? _c : "new" };
+        storage2.set(STORAGE_KEYS.filters, all);
+      }
+    };
+    const preload2 = {
+      get(cardId) {
+        return read(STORAGE_KEYS.preload)[cardId] || null;
+      },
+      set(cardId, data) {
+        const all = read(STORAGE_KEYS.preload);
+        all[cardId] = data;
+        storage2.set(STORAGE_KEYS.preload, all);
+      },
+      remove(cardId) {
+        const all = read(STORAGE_KEYS.preload);
+        if (!(cardId in all)) return;
+        delete all[cardId];
+        storage2.set(STORAGE_KEYS.preload, all);
+      },
+      // Overwrites the whole list (the local copy of TorrServer's list).
+      replace(map) {
+        storage2.set(STORAGE_KEYS.preload, map && typeof map === "object" ? map : {});
+      },
+      all() {
+        const all = read(STORAGE_KEYS.preload);
+        return Object.keys(all).map((cardId) => ({ cardId, ...all[cardId] })).sort((a, b) => (b.added || 0) - (a.added || 0));
+      }
+    };
+    function trim(key, field) {
+      const all = read(key);
+      const ids = Object.keys(all);
+      const valid = ids.filter((id) => all[id] && typeof all[id] === "object");
+      if (ids.length <= MAX_ENTRIES && valid.length === ids.length) return;
+      valid.sort((a, b) => (Number(all[b][field]) || 0) - (Number(all[a][field]) || 0));
+      const kept = {};
+      for (const id of valid.slice(0, MAX_ENTRIES)) kept[id] = all[id];
+      storage2.set(key, kept);
+    }
+    function prune() {
+      trim(STORAGE_KEYS.progress, "updated");
+      trim(STORAGE_KEYS.tvcache, "checked");
+      trim(STORAGE_KEYS.seasonmap, "checked");
+    }
+    const rows = {
+      get() {
+        return normalizeRowsConfig(storage2.get(STORAGE_KEYS.rows, null));
+      },
+      set(cfg) {
+        storage2.set(STORAGE_KEYS.rows, normalizeRowsConfig(cfg));
+      }
+    };
+    return { progress, seen, tvcache, seasonmap, notify, filters, preload: preload2, rows, prune };
+  }
+
+  // src/lampa.js
+  var storage = {
+    get: (key, empty) => window.Lampa.Storage.get(key, empty),
+    set: (key, value) => window.Lampa.Storage.set(key, value)
+  };
+  var noty = (text) => window.Lampa.Noty.show(text);
+  var tmdbGet = (url, params, ok, fail3) => window.Lampa.Api.sources.tmdb.get(url, params, ok, fail3);
+  var favoriteGet = (params) => window.Lampa.Favorite.get(params) || [];
+  var lampa = () => window.Lampa;
+  var store = createStore(storage);
+  var storageField = (name) => window.Lampa.Storage.field(name);
+
+  // src/episodes.js
+  var realSeasons = (seasons) => (seasons || []).filter((s) => s && s.season_number > 0).sort((a, b) => a.season_number - b.season_number);
+  var findSeason = (seasons, n) => realSeasons(seasons).find((s) => s.season_number === n);
+  function episodeStatus(tv, today) {
+    const list = realSeasons(tv && tv.seasons);
+    const last = tv && tv.last_episode_to_air;
+    const airing = !!tv && (tv.status === "Returning Series" || !!tv.next_episode_to_air);
+    if (!last) {
+      const s = list[list.length - 1];
+      const total2 = s ? s.episode_count : 0;
+      return { season: s ? s.season_number : 1, aired: total2, total: total2, airing };
+    }
+    const season = last.season_number;
+    const info = findSeason(list, season);
+    const total = info ? info.episode_count : last.episode_number;
+    const future = !!last.air_date && !!today && last.air_date > today;
+    const aired = future ? Math.max(0, last.episode_number - 1) : last.episode_number;
+    return { season, aired, total, airing };
+  }
+  function absoluteEpisode(seasons, season, episode) {
+    let sum = 0;
+    for (const s of realSeasons(seasons)) {
+      if (s.season_number < season) sum += s.episode_count;
+    }
+    return sum + episode;
+  }
+  function nextEpisode(progress, seasons) {
+    if (!progress) return { season: 1, episode: 1 };
+    const cur = findSeason(seasons, progress.season);
+    if (cur && progress.episode < cur.episode_count) {
+      return { season: progress.season, episode: progress.episode + 1 };
+    }
+    if (findSeason(seasons, progress.season + 1)) {
+      return { season: progress.season + 1, episode: 1 };
+    }
+    return { season: progress.season, episode: progress.episode };
+  }
+  var NOT_EPISODE_NUMBERS = /* @__PURE__ */ new Set([360, 480, 576, 1440, 2160, 4320]);
+  var RESOLUTIONS = /* @__PURE__ */ new Set([...NOT_EPISODE_NUMBERS, 720, 1080]);
+  function parseEpisode(filename) {
+    const result = (season, episode, absolute) => ({ season, episode, absolute });
+    let name = String(filename || "").replace(/^.*[\\/]/, "");
+    name = name.replace(/(?<![0-9A-Za-z])(?:19|20)\d{2}(?![0-9A-Za-z])/g, " ");
+    let m = name.match(/(?<![0-9A-Za-z])s(\d{1,2})[ ._-]?e(\d{1,4})(?!\d)/i);
+    if (m) return result(+m[1], +m[2], null);
+    m = name.match(/(?<![0-9A-Za-z])(\d{1,2})x(\d{1,4})(?![0-9A-Za-z])/i);
+    if (m) return result(+m[1], +m[2], null);
+    m = name.match(/сезон\s*(\d{1,2})\D{0,10}?сери[яи]\s*(\d{1,4})/i);
+    if (m) return result(+m[1], +m[2], null);
+    m = name.match(/(?<![0-9A-Za-z])(?:ep(?:isode)?|e)[ ._-]?(\d{1,4})(?!\d)/i) || name.match(/сери[яи][ ._-]?(\d{1,4})(?!\d)/i);
+    if (m) return result(null, +m[1], +m[1]);
+    m = name.match(/\[(\d{1,4})\]/);
+    if (m && !RESOLUTIONS.has(+m[1])) return result(null, +m[1], +m[1]);
+    m = name.match(/\s-\s(\d{1,4})(?=\s|\.|\[|$)/);
+    if (m && !NOT_EPISODE_NUMBERS.has(+m[1])) return result(null, +m[1], +m[1]);
+    return result(null, null, null);
+  }
+  function trackerPosition(map, absolute) {
+    if (!Array.isArray(map) || !(absolute > 0)) return null;
+    for (const s of map) {
+      const list = Array.isArray(s.episodes) && s.episodes.length ? s.episodes : null;
+      const i = list ? list.indexOf(absolute) : absolute - s.start;
+      if (list ? i >= 0 : i >= 0 && i < s.count) return { season: s.season, episode: i + 1, start: s.start, count: s.count };
+    }
+    return null;
+  }
+  function absoluteOf(map, season, episode) {
+    const s = (map || []).find((x) => x && x.season === season);
+    if (!s || !(episode >= 1) || episode > s.count) return null;
+    return Array.isArray(s.episodes) && s.episodes[episode - 1] != null ? s.episodes[episode - 1] : s.start + episode - 1;
+  }
+
+  // src/torrent-select.js
+  var GiB = 1024 ** 3;
+  var re = (src) => new RegExp(src, "iu");
+  var RE_RUSSIAN = re(RUSSIAN_MARKERS);
+  var RE_SUBS = re(SUBTITLE_PHRASES);
+  var RE_SCREENER = re(SCREENER_MARKERS);
+  var RE_DV = re(DV_MARKERS);
+  var RE_DV_P5 = re(DV_P5_MARKERS);
+  var RE_HDR = re(HDR_MARKERS);
+  var RE_VOICE = re(VOICE_MARKERS);
+  var RE_EXT = re(EXT_AUDIO_MARKERS);
+  var RE_RAW = re(RAW_MARKERS);
+  var RE_SUBS_ONLY = re(SUBS_ONLY_MARKERS);
+  var RE_ANIME_STUDIO = re(ANIME_VOICE_STUDIOS);
+  var STUDIO_RES = Object.entries(VOICE_STUDIOS).map(([id, src]) => [id, re(src)]);
+  function detectStudio(title) {
+    for (const [id, rx] of STUDIO_RES) if (rx.test(title)) return id;
+    return null;
+  }
+  function detectResolution(t) {
+    if (/(?<![\d])2160\s*p?|\b4k\b|\buhd\b/i.test(t)) return 2160;
+    if (/(?<![\d])1080\s*[pi]?(?![\d])/i.test(t)) return 1080;
+    if (/(?<![\d])720\s*p?(?![\d])/i.test(t)) return 720;
+    if (/(?<![\d])(?:480|576)\s*p?(?![\d])/i.test(t)) return 480;
+    return null;
+  }
+  function detectAudio(t) {
+    if (/e-?ac-?3|\bddp/i.test(t)) return "eac3";
+    if (/(?<![a-z])ac-?3(?![a-z\d])|\bdd ?5\.1/i.test(t)) return "ac3";
+    if (/truehd/i.test(t)) return "truehd";
+    if (/\bdts/i.test(t)) return "dts";
+    if (/\baac/i.test(t)) return "aac";
+    return null;
+  }
+  function detectVoice(t, studio, audioText) {
+    if (studio === "lostfilm" || studio === "hdrezka" || studio === "anidub") return studio;
+    if (studio) return "other";
+    if (/дубляж|(?<![\p{L}\d])dub(?!bed)/iu.test(t)) return "dub";
+    if (/\bmvo\b|многоголос/i.test(t)) return "mvo";
+    return RE_RUSSIAN.test(audioText) ? "other" : null;
+  }
+  function detectSeasons(t) {
+    const out = /* @__PURE__ */ new Set();
+    const add = (a, b) => {
+      for (let s = a; s <= b && s - a < 60; s++) out.add(s);
+    };
+    let m;
+    const sx = /(?<![\p{L}\d])s(\d{1,2})(?:\s*-\s*s?(\d{1,2}))?(?![\d])(?!e\d)/giu;
+    while (m = sx.exec(t)) add(+m[1], m[2] ? +m[2] : +m[1]);
+    const en = /(?<![\p{L}\d])season\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?(?![\d])/giu;
+    while (m = en.exec(t)) add(+m[1], m[2] ? +m[2] : +m[1]);
+    const nth = /(?<![\p{L}\d])(\d{1,2})(?:st|nd|rd|th)\s+season/giu;
+    while (m = nth.exec(t)) add(+m[1], +m[1]);
+    const tv = /(?<![\p{L}\d])(?:tv|тв)-?(\d{1,2})(?![\d])/giu;
+    while (m = tv.exec(t)) add(+m[1], +m[1]);
+    const before = /(?<![\p{L}\d])(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*сезон/giu;
+    let prefixed = false;
+    while (m = before.exec(t)) {
+      prefixed = true;
+      add(+m[1], m[2] ? +m[2] : +m[1]);
+    }
+    const ru = /сезон[ы:]*\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?/giu;
+    while (!prefixed && (m = ru.exec(t))) add(+m[1], m[2] ? +m[2] : +m[1]);
+    return out.size ? [...out].sort((a, b) => a - b) : null;
+  }
+  function detectEpisodeRange(t) {
+    const patterns = [
+      /(?<![\p{L}\d])e(\d{1,4})\s*-\s*e?(\d{1,4})(?!\d)/iu,
+      /\[\s*(\d{1,4})\s*-\s*(\d{1,4})\s*\]/,
+      /(\d{1,4})\s*-\s*(\d{1,4})\s*(?:of|из|серии|серий|episodes|eps)(?![\p{L}])/iu,
+      /(?:серии|серия|episodes?|eps?)[\s:]*(\d{1,4})\s*-\s*(\d{1,4})/iu
+    ];
+    for (const p of patterns) {
+      const m = t.match(p);
+      if (m && +m[1] <= +m[2] && +m[1] < 1900) return [+m[1], +m[2]];
+    }
+    return null;
+  }
+  function detectSxeRange(t) {
+    const m = t.match(/(?<![\p{L}\d])s(\d{1,2})[ ._-]?e(\d{1,4})\s*-\s*e?(\d{1,4})(?!\d)/iu);
+    return m && +m[2] <= +m[3] ? { season: +m[1], range: [+m[2], +m[3]] } : null;
+  }
+  function parseTitle(title) {
+    const t = String(title || "");
+    const audioText = t.replace(RE_SUBS, " ");
+    const studio = detectStudio(t);
+    const hdr = RE_HDR.test(t);
+    const dv = RE_DV.test(t);
+    const dvP5 = dv && RE_DV_P5.test(t);
+    const range = detectEpisodeRange(t);
+    const ep = parseEpisode(t);
+    return {
+      resolution: detectResolution(t),
+      screener: RE_SCREENER.test(t),
+      dvOnly: dv && (dvP5 || !hdr),
+      hdr,
+      russian: RE_RUSSIAN.test(audioText) || studio !== null,
+      voice: detectVoice(t, studio, audioText),
+      explicitVoice: studio !== null || RE_VOICE.test(audioText),
+      extAudio: RE_EXT.test(audioText),
+      raw: RE_RAW.test(t),
+      subsOnly: RE_SUBS_ONLY.test(t),
+      animeStudio: RE_ANIME_STUDIO.test(audioText),
+      studio,
+      audio: detectAudio(t),
+      seasons: detectSeasons(t),
+      episodeRange: range,
+      sxeRange: detectSxeRange(t),
+      episode: ep.episode == null ? null : ep,
+      total: statedTotal(t)
+    };
+  }
+  var seasonTagged = (p) => !!(p.seasons || p.sxeRange || p.episode && p.episode.season != null);
+  function hasEpisode(p, ctx) {
+    if (ctx.trackerSeason == null) return hasEpisodePlain(p, ctx);
+    const plain = { ...ctx, trackerSeason: null };
+    if (!seasonTagged(p)) {
+      if (!p.episodeRange && !p.episode && p.total > 0) return ctx.absolute <= p.total;
+      return hasEpisodePlain(p, plain);
+    }
+    const tracker = { ...plain, season: ctx.trackerSeason, episode: ctx.trackerEpisode, absolute: ctx.trackerEpisode };
+    const otherSeason = !!p.seasons && !p.seasons.includes(ctx.trackerSeason);
+    if (!otherSeason && hasEpisodePlain(p, tracker)) return true;
+    const r = p.episodeRange;
+    const one = !!p.seasons && p.seasons.length === 1 && (p.seasons[0] === 1 || p.seasons[0] === ctx.trackerSeason);
+    return ctx.trackerSeason > 1 && one && !p.sxeRange && !!r && ctx.absolute >= r[0] && ctx.absolute <= r[1];
+  }
+  function hasEpisodePlain(p, ctx) {
+    var _a, _b, _c;
+    const wantEp = (_a = ctx.episode) != null ? _a : null;
+    const wantAbs = (_c = (_b = ctx.absolute) != null ? _b : ctx.episode) != null ? _c : null;
+    const inRange = (n) => n != null && p.episodeRange && n >= p.episodeRange[0] && n <= p.episodeRange[1];
+    if (p.sxeRange) {
+      const [a, b] = p.sxeRange.range;
+      return p.sxeRange.season === ctx.season && wantEp >= a && wantEp <= b;
+    }
+    if (p.episode && p.episode.season == null && p.seasons && ctx.season != null && !p.seasons.includes(ctx.season)) return false;
+    if (p.episode && p.episode.season == null && p.episodeRange) return inRange(ctx.kind === "anime" ? wantAbs : wantEp);
+    if (p.episode) {
+      if (p.episode.season != null) {
+        return p.episode.season === ctx.season && p.episode.episode === wantEp;
+      }
+      return ctx.kind === "anime" ? p.episode.absolute === wantAbs : p.episode.absolute === wantEp;
+    }
+    if (p.seasons) {
+      if (ctx.season != null && !p.seasons.includes(ctx.season)) return false;
+      return p.episodeRange ? inRange(wantEp) : true;
+    }
+    if (p.episodeRange) return inRange(ctx.kind === "anime" ? wantAbs : wantEp);
+    return true;
+  }
+  var norm = (s) => String(s || "").toLowerCase().replace(/ё/g, "\u0435").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  var SHORT_NAME = 8;
+  function containsName(title, name) {
+    const n = norm(name);
+    if (!n) return false;
+    const t = norm(title);
+    return n.length < SHORT_NAME ? (" " + t + " ").includes(" " + n + " ") : t.includes(n);
+  }
+  function isRelevant(title, names) {
+    const list = (names || []).filter((n) => norm(n));
+    if (!list.length) return true;
+    return list.some((n) => containsName(title, n));
+  }
+  var RU_LANG = /^(?:rus?|russian)$/i;
+  var UKR_LETTERS = /[іїєґ]|укр/i;
+  var UNKNOWN_LANG = /^(?:|und|unk|unknown|mis|mul|zxx)$/i;
+  function streamIsRussian(s) {
+    const tags = s && s.tags || {};
+    const lang = String(tags.language || "").trim();
+    if (RU_LANG.test(lang)) return true;
+    if (!UNKNOWN_LANG.test(lang)) return false;
+    const name = String(tags.title || "");
+    return /\p{Script=Cyrillic}/u.test(name) && !UKR_LETTERS.test(name) || /(?<![\p{L}])rus/iu.test(name);
+  }
+  function audioFromFfprobe(ffprobe) {
+    const audio = (Array.isArray(ffprobe) ? ffprobe : []).filter((s) => s && s.codec_type === "audio");
+    if (!audio.length) return "unknown";
+    if (audio.some(streamIsRussian)) return "ru";
+    return audio.every((s) => !UNKNOWN_LANG.test(String(s.tags && s.tags.language || "").trim())) ? "none" : "unknown";
+  }
+  function audioFromResult(result) {
+    const probe = audioFromFfprobe(result && result.ffprobe);
+    if (probe === "ru") return "ru";
+    const langs = Array.isArray(result && result.languages) ? result.languages.map(String) : [];
+    if (langs.some((l) => RU_LANG.test(l))) return "ru";
+    if (probe === "none" || langs.length) return "none";
+    return "unknown";
+  }
+  var cyrillic = (s) => /\p{Script=Cyrillic}/u.test(String(s || ""));
+  function classifyAudio(p, result, ctx) {
+    const anime = ctx.kind === "anime";
+    const title = String(result && result.Title || "");
+    const info = result && result.info;
+    const voices = info && Array.isArray(info.voices) ? info.voices.join(" ") : "";
+    const animeStudio = anime && (p.animeStudio || RE_ANIME_STUDIO.test(voices));
+    const out = (russian, voice, extra) => ({ russian, voice, studio: p.studio, penalty: 0, reason: null, ...extra });
+    if (anime && p.raw && !(p.explicitVoice || animeStudio)) return out(false, null, { reason: "raw" });
+    if (p.extAudio) return out(true, p.voice || "other", { penalty: SCORING.extAudioPenalty });
+    if (p.russian || animeStudio) return out(true, p.voice || "other");
+    const meta = audioFromResult(result);
+    if (meta === "ru") {
+      const studio = detectStudio(voices);
+      return out(true, detectVoice("", studio, "") || "other", { studio });
+    }
+    if (meta === "none") return out(false, null, { reason: "no-russian" });
+    const ruNames = (ctx.names || []).filter(cyrillic);
+    if (anime && !p.subsOnly && ruNames.some((n) => containsName(title, n))) {
+      return out(false, "unknown", { penalty: SCORING.unknownVoicePenalty });
+    }
+    return out(false, null, { reason: "no-russian" });
+  }
+  function titleYears(title) {
+    const out = [];
+    const re2 = /(?<!\d)((?:19|20)\d\d)(?:\s*[-–]\s*((?:19|20)\d\d))?(?!\d)/g;
+    for (const m of String(title || "").matchAll(re2)) out.push([Number(m[1]), Number(m[2] || m[1])]);
+    return out;
+  }
+  function wrongYear(title, year) {
+    if (!year) return false;
+    const years = titleYears(title);
+    return years.length > 0 && !years.some(([a, b]) => year >= a - 1 && year <= b + 1);
+  }
+  function rejectReason(p, result, ctx) {
+    if (!isRelevant(result.Title, ctx.names)) return "unrelated";
+    if (ctx.kind === "movie" && wrongYear(result.Title, ctx.year)) return "wrong-year";
+    if (p.screener) return "screener";
+    if (p.dvOnly) return "dv-only";
+    if (p.audioReason) return p.audioReason;
+    if (ctx.kind === "movie" && Number(result.Size) > LIMITS.maxMovieBytes) return "oversize";
+    if ((ctx.kind === "tv" || ctx.kind === "anime") && !hasEpisode(p, ctx)) return "episode-missing";
+    return null;
+  }
+  function effectiveResolution(p, result, ctx) {
+    const floors = SIZE_FLOORS[ctx.kind];
+    const size = Number(result.Size) || 0;
+    if (!floors || !size) return p.resolution;
+    let res = p.resolution;
+    if (res === 2160 && size < floors[2160]) res = 1080;
+    if (res === 1080 && size < floors[1080]) res = "thin";
+    return res;
+  }
+  function score(p, result, ctx) {
+    const W = SCORING;
+    let quality = W.quality.unknown;
+    const res = effectiveResolution(p, result, ctx);
+    if (res === 720) quality = ctx.kind === "anime" ? W.quality.anime720 : W.quality[720];
+    else if (res) quality = W.quality[res];
+    const pref = VOICE_PREFERENCE[ctx.kind] || [];
+    const rank = pref.indexOf(p.studio);
+    let voice = 0;
+    if (rank === 0) voice = W.voiceFirst;
+    else if (rank === 1) voice = W.voiceSecond;
+    else if (p.russian) voice = W.voiceAnyRussian;
+    const audio = ["ac3", "aac", "eac3"].includes(p.audio) ? W.audioLossy : 0;
+    const seeders = Math.max(0, Number(result.Seeders) || 0);
+    let seeds = Math.min(W.seedsCap, Math.log2(seeders + 1) * W.seedsFactor);
+    if (seeders < W.deadSeeders) seeds -= W.deadPenalty;
+    const sizePenalty = (Number(result.Size) || 0) / GiB * W.sizePenaltyPerGiB;
+    return quality + voice + audio + seeds - sizePenalty - (p.audioPenalty || 0);
+  }
+  function selectTorrent(results, ctx) {
+    const scored = (results || []).map((result) => {
+      const title = parseTitle(result.Title);
+      const a = classifyAudio(title, result, ctx);
+      const p = { ...title, russian: a.russian, voice: a.voice, studio: a.studio, audioPenalty: a.penalty, audioReason: a.reason };
+      return { result, score: score(p, result, ctx), rejected: rejectReason(p, result, ctx), voice: p.voice };
+    });
+    scored.sort((a, b) => (a.rejected ? 1 : 0) - (b.rejected ? 1 : 0) || b.score - a.score);
+    const top = scored.find((s) => !s.rejected);
+    return { chosen: top ? top.result : null, scored };
+  }
+  function statedTotal(t) {
+    const m = String(t || "").match(/(?<![\p{L}\d])(?:\d{1,4}\s*-\s*)?\d{1,4}\s*(?:из|of)\s*(\d{1,4})(?!\d)/iu);
+    return m ? +m[1] : null;
+  }
+  function inferSeasonMap(results, { names, total } = {}) {
+    const totals = /* @__PURE__ */ new Map();
+    for (const r of results || []) {
+      if (!r || !isRelevant(r.Title, names)) continue;
+      const p = parseTitle(r.Title);
+      const seasons = p.seasons || (p.sxeRange ? [p.sxeRange.season] : null);
+      if (!seasons || seasons.length !== 1) continue;
+      const n = statedTotal(r.Title);
+      if (!(n > 0) || n > 500) continue;
+      totals.set(seasons[0], Math.max(totals.get(seasons[0]) || 0, n));
+    }
+    const map = [];
+    let start3 = 1;
+    for (let season = 1; totals.has(season); season++) {
+      if (total > 0 && start3 > total) break;
+      const count = totals.get(season);
+      const episodes = [];
+      for (let i = 0; i < count; i++) episodes.push(start3 + i);
+      map.push({ season, start: start3, count, episodes });
+      start3 += count;
+    }
+    return map.length >= 2 ? map : null;
+  }
+
+  // src/search-query.js
+  var MIN_TITLE = 4;
+  var MAX_TITLE = 60;
+  var MIN_TWO_WORDS = 12;
+  var LONG_TITLE = 40;
+  var FEW_RESULTS = 5;
+  var FOREIGN = /(?=\p{L})[^\p{Script=Latin}\p{Script=Cyrillic}]/u;
+  function isLatinOrCyrillic(str) {
+    const s = String(str || "");
+    return /\p{L}/u.test(s) && !FOREIGN.test(s);
+  }
+  function isLatin(str) {
+    const s = String(str || "");
+    return isLatinOrCyrillic(s) && /\p{Script=Latin}/u.test(s) && !/\p{Script=Cyrillic}/u.test(s);
+  }
+  var hasCyrillic = (str) => /\p{Script=Cyrillic}/u.test(String(str || ""));
+  function shortTitle(name) {
+    const original = String(name || "").trim();
+    let s = original;
+    const cuts = [":", " \u2014 ", " \u2013 ", " ~ ", "("].map((c) => s.indexOf(c)).filter((i) => i >= 0);
+    if (cuts.length) s = s.slice(0, Math.min(...cuts)).trim();
+    if (s.length < MIN_TITLE) s = original;
+    if (s.length > MAX_TITLE) {
+      const head = s.slice(0, MAX_TITLE + 1);
+      const space = head.lastIndexOf(" ");
+      s = (space >= MIN_TITLE ? head.slice(0, space) : s.slice(0, MAX_TITLE)).trim();
+    }
+    return s;
+  }
+  function queryTitle(name, kind) {
+    const s = String(name || "").trim();
+    if (!isLatinOrCyrillic(s)) return "";
+    if (kind === "movie") return s;
+    return s.length > LONG_TITLE ? shortTitle(s) : s;
+  }
+  function altList(json) {
+    return json && (json.results || json.titles) || [];
+  }
+  function uniqueShort(titles) {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    titles.forEach((title) => {
+      const s = shortTitle(title);
+      const key = s.toLowerCase();
+      if (s.length >= MIN_TITLE && !seen.has(key)) {
+        seen.add(key);
+        out.push(s);
+      }
+    });
+    return out;
+  }
+  function latinAltTitles(json) {
+    const rank = (c) => c === "JP" ? 0 : 1;
+    return uniqueShort(altList(json).filter((t) => t && (t.iso_3166_1 === "JP" || t.iso_3166_1 === "US") && isLatin(t.title)).sort((a, b) => rank(a.iso_3166_1) - rank(b.iso_3166_1)).map((t) => t.title));
+  }
+  function cyrillicAltTitles(json) {
+    return uniqueShort(altList(json).filter((t) => t && (t.iso_3166_1 === "RU" || t.iso_3166_1 === "UA") && hasCyrillic(t.title) && isLatinOrCyrillic(t.title)).map((t) => t.title));
+  }
+  function nameForms(name) {
+    const s = String(name || "").trim();
+    if (!s || !isLatinOrCyrillic(s)) return [];
+    const cuts = [":", " \u2014 ", "("].map((c) => s.indexOf(c)).filter((i) => i >= 0);
+    const head = cuts.length ? s.slice(0, Math.min(...cuts)).trim() : s;
+    const out = [head.length >= MIN_TITLE ? head : s, shortTitle(s)];
+    if (s.length > LONG_TITLE) {
+      const two = s.split(/\s+/).slice(0, 2).join(" ").replace(/[:,.(—–~]+$/, "");
+      if (two.length >= MIN_TWO_WORDS) out.push(two);
+    }
+    return out;
+  }
+  function queryTitles(card, alts = [], opts = {}) {
+    const kind = opts.kind;
+    const rawRu = card.title || card.name || "";
+    const rawOriginal = card.original_title || card.original_name || "";
+    const ru = queryTitle(rawRu, kind);
+    const original = queryTitle(rawOriginal, kind);
+    const alt = alts[0] || "";
+    const title = ru || alt || original;
+    const short = ru ? shortTitle(ru) : "";
+    let names = [];
+    const add = (n) => {
+      if (n && !names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
+    };
+    const forms = kind === "movie" ? (n) => isLatinOrCyrillic(n) ? [String(n).trim()] : [] : nameForms;
+    [rawRu, rawOriginal, ...alts, ...opts.cyrillic || []].forEach((n) => forms(n).forEach(add));
+    if (kind === "anime" && !names.some(isLatin)) names = [];
+    return { title, original: original || title, alt, short: short !== title ? short : "", names };
+  }
+  function searchParamsFor(card, ctx, parseLang, title, original) {
+    const year = String(card.first_air_date || card.release_date || "0000").slice(0, 4);
+    const combinations = {
+      df: original,
+      df_year: original + " " + year,
+      df_lg: original + " " + title,
+      df_lg_year: original + " " + title + " " + year,
+      lg: title,
+      lg_year: title + " " + year,
+      lg_df: title + " " + original,
+      lg_df_year: title + " " + original + " " + year
+    };
+    const s = ctx && ctx.kind !== "movie" && !ctx.seasonMap && Number.isInteger(ctx.season) && ctx.season >= 0 ? ctx.season : null;
+    const season = s == null ? "" : " S" + (s < 10 ? "0" : "") + s;
+    return {
+      search: (combinations[parseLang] || original || title) + season,
+      search_one: title + season,
+      search_two: original + season,
+      movie: card,
+      page: 1
+    };
+  }
+  var withTitles = (card, title, original) => ({ ...card, title, original_title: original });
+  function firstQuery(card, ctx, parseLang, t) {
+    const movie = withTitles(card, t.title, t.original);
+    return searchParamsFor(movie, ctx, parseLang, t.title, t.original);
+  }
+  var same = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+  function secondQuery(card, ctx, t) {
+    if (!t.alt) return null;
+    if (same(t.alt, t.title) || same(t.alt, t.original)) return null;
+    const movie = withTitles(card, t.title, t.alt);
+    return searchParamsFor(movie, ctx, "df", t.title, t.alt);
+  }
+  function shortQuery(card, ctx, t) {
+    if (!t.short || same(t.short, t.title)) return null;
+    const movie = withTitles(card, t.short, t.short);
+    return searchParamsFor(movie, ctx, "lg", t.short, t.short);
+  }
+  var needSecond = (kind, count) => kind === "anime" || count < FEW_RESULTS;
+  function followUpQueries(card, ctx, t, firstCount) {
+    const out = [];
+    if (firstCount < FEW_RESULTS) out.push(shortQuery(card, ctx, t));
+    if (needSecond(ctx.kind, firstCount)) out.push(secondQuery(card, ctx, t));
+    return out.filter(Boolean);
+  }
+  function mergeResults(...lists) {
+    const out = [];
+    const links = /* @__PURE__ */ new Set();
+    const titles = /* @__PURE__ */ new Set();
+    for (const list of lists) {
+      for (const r of list || []) {
+        if (!r) continue;
+        const link = r.MagnetUri || r.Link || "";
+        const title = String(r.Title || "").trim().toLowerCase();
+        if (link && links.has(link) || title && titles.has(title)) continue;
+        if (link) links.add(link);
+        if (title) titles.add(title);
+        out.push(r);
+      }
+    }
+    return out;
+  }
+
+  // src/play-error.js
+  var PlayError = class extends Error {
+    constructor(msg, fatal = false) {
+      super(msg);
+      this.fatal = fatal;
+    }
+  };
+  var fail = (msg, fatal) => new PlayError(msg, fatal);
+  function withTimeout(promise, ms, msg) {
+    let timer;
+    const t = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(fail(msg)), ms);
+    });
+    return Promise.race([promise, t]).finally(() => clearTimeout(timer));
+  }
+  var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // src/play-pick.js
+  var ANIMATION = 16;
+  var VIDEO = ["asf", "wmv", "divx", "avi", "mp4", "m4v", "mov", "3gp", "3g2", "mkv", "trp", "tp", "mts", "mpg", "mpeg", "dat", "vob", "rm", "rmvb", "m2ts", "ts"];
+  var ext = (path) => String(path || "").split(".").pop().toLowerCase();
+  var isVideo = (f) => VIDEO.includes(ext(f.path));
+  function releaseLabel(result) {
+    if (!result) return "";
+    const p = parseTitle(result.Title);
+    const gib = (Number(result.Size) || 0) / 1024 ** 3;
+    const size = gib >= 0.1 ? `${gib.toFixed(1).replace(".", ",")} \u0413\u0411` : "";
+    return [p.resolution ? `${p.resolution}p` : "", size, p.studio || ""].filter(Boolean).join(" \xB7 ");
+  }
+  function genreIds(card) {
+    if (!card) return [];
+    if (Array.isArray(card.genre_ids) && card.genre_ids.length) return card.genre_ids;
+    return (Array.isArray(card.genres) ? card.genres : []).map((g) => g && g.id).filter((id) => id != null);
+  }
+  function detectKind(card) {
+    if (!card || !card.original_name) return "movie";
+    const jp = (card.origin_country || []).includes("JP");
+    return jp && genreIds(card).includes(ANIMATION) ? "anime" : "tv";
+  }
+  function normalizeTitles(card) {
+    const out = { ...card };
+    if (!out.title && out.name) out.title = out.name;
+    if (!out.original_title && out.original_name) out.original_title = out.original_name;
+    return out;
+  }
+  var originalTitle = (movie) => movie.original_title || movie.original_name || "";
+  function titleHasSeason(title) {
+    const p = parseTitle(title);
+    return !!(p.seasons || p.sxeRange || p.episode && p.episode.season != null);
+  }
+  function trackerFields(o) {
+    if (!o || o.trackerSeason == null) return {};
+    return { trackerSeason: o.trackerSeason, trackerEpisode: o.trackerEpisode, trackerStart: o.trackerStart, trackerCount: o.trackerCount };
+  }
+  function withTracker(ctx, map, keepMap = true) {
+    if (!ctx || !map) return ctx;
+    const { trackerSeason, trackerEpisode, trackerStart, trackerCount, ...rest } = ctx;
+    const out = keepMap ? { ...rest, seasonMap: map } : rest;
+    const pos = trackerPosition(map, ctx.absolute);
+    return pos ? { ...out, trackerSeason: pos.season, trackerEpisode: pos.episode, trackerStart: pos.start, trackerCount: pos.count } : out;
+  }
+  function inferTracker(ctx, results, names) {
+    if (!ctx || ctx.trackerSeason != null || ctx.seasonMap || !(ctx.inferTotal > 0)) return ctx;
+    const map = inferSeasonMap(results, { names, total: ctx.inferTotal });
+    return map ? withTracker(ctx, map, false) : ctx;
+  }
+  function packNumbering(files, ctx) {
+    if (!ctx || ctx.trackerSeason == null || !(ctx.trackerStart > 0)) return null;
+    const count = ctx.trackerCount > 0 ? ctx.trackerCount : Infinity;
+    const bare = (files || []).filter(isVideo).map((f) => parseEpisode(f.path)).filter((ep) => ep.season == null && ep.absolute != null);
+    return bare.some((ep) => ep.absolute > count) ? "absolute" : "season";
+  }
+  function absoluteInPack(episode, ctx) {
+    if (!(episode > 0) || !ctx || !(ctx.trackerStart > 0)) return episode;
+    return ctx.trackerStart - 1 + episode;
+  }
+  function pickFile(files, ctx, infos) {
+    const videos = (files || []).filter(isVideo);
+    if (!videos.length) return null;
+    if (ctx.trackerSeason != null && ctx.kind !== "movie") {
+      const { trackerSeason, trackerEpisode, trackerStart, trackerCount, ...plain } = ctx;
+      const sxe = videos.find((f) => {
+        const ep = parseEpisode(f.path);
+        return ep.season != null && ep.season === trackerSeason && ep.episode === trackerEpisode;
+      });
+      if (sxe) return sxe;
+      if (packNumbering(videos, ctx) === "absolute") return pickFile(videos, { ...plain, titleHasSeason: false }, infos);
+      return pickFile(videos, { ...plain, season: trackerSeason, episode: trackerEpisode, absolute: trackerEpisode, titleHasSeason: true }, infos);
+    }
+    if (ctx.kind === "movie") {
+      return videos.reduce((best, f) => (f.length || 0) > (best.length || 0) ? f : best);
+    }
+    const parsed = videos.map((f) => ({ f, ep: parseEpisode(f.path) }));
+    const bySxe = parsed.find(({ ep }) => ep.season != null && ep.season === ctx.season && ep.episode === ctx.episode);
+    if (bySxe) return bySxe.f;
+    const bare = parsed.filter(({ ep }) => ep.season == null && ep.absolute != null);
+    const absFirst = ctx.kind === "anime" && !ctx.titleHasSeason;
+    const numbers = absFirst ? [ctx.absolute, ctx.episode] : [ctx.episode, ctx.absolute];
+    const infoOf = (f) => Array.isArray(infos) ? infos.find((i) => i && i.id === f.id) : null;
+    const otherSeason = (f) => {
+      const i = infoOf(f);
+      return !!i && !i.defaultSeason && i.season != null && i.season !== ctx.season;
+    };
+    let ambiguous = false;
+    for (const n of numbers) {
+      if (n == null) continue;
+      const hits = bare.filter(({ ep }) => ep.absolute === n);
+      if (hits.length === 1) {
+        if (!otherSeason(hits[0].f)) return hits[0].f;
+        ambiguous = true;
+        break;
+      }
+      if (hits.length > 1) {
+        ambiguous = true;
+        break;
+      }
+    }
+    if (Array.isArray(infos)) {
+      const ids = new Set(videos.map((f) => f.id));
+      const hits = infos.filter((i) => i && ids.has(i.id) && i.season === ctx.season && i.episode === ctx.episode);
+      if (hits.length === 1) return videos.find((f) => f.id === hits[0].id);
+    }
+    if (ambiguous) return null;
+    return videos.length === 1 && parsed[0].ep.episode == null ? videos[0] : null;
+  }
+  function previousEpisodeCtx(ctx) {
+    if (!ctx || ctx.kind === "movie" || !(ctx.episode > 1)) return null;
+    const prev = { ...ctx, episode: ctx.episode - 1, absolute: ctx.absolute > 1 ? ctx.absolute - 1 : ctx.absolute };
+    if (ctx.trackerSeason == null) return prev;
+    if (!(ctx.trackerEpisode > 1)) return null;
+    return { ...prev, trackerEpisode: ctx.trackerEpisode - 1 };
+  }
+
+  // src/play-search.js
+  var QUERY_GAP_MS = 1200;
+  var RETRY_FAST_MS = 500;
+  var RETRY_AFTER_MS = 2e3;
+  var RESULTS_TTL_MS = 6e4;
+  var ALT_TIMEOUT_MS = 5e3;
+  var MSG_PARSER = "\u041F\u0430\u0440\u0441\u0435\u0440 \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B";
+  function buildSearchParams(card, ctx, parseLang) {
+    const title = card.title || card.name || "";
+    const original = card.original_title || card.original_name || title;
+    return searchParamsFor(card, ctx, parseLang, title, original);
+  }
+  var listParams = (card, ctx) => buildSearchParams(card, ctx, storageField("parse_lang"));
+  function openNativeList(params) {
+    const L = lampa();
+    L.Activity.push({ url: "", title: L.Lang.translate("title_torrents"), component: "torrents", ...params });
+  }
+  function searchTorrents(params) {
+    const L = lampa();
+    const req = new Promise((resolve, reject) => {
+      L.Parser.get(params, (data) => resolve(data && data.Results || []), () => reject(fail(MSG_PARSER)));
+    });
+    return withTimeout(req, LIMITS.searchTimeoutMs, MSG_PARSER);
+  }
+  async function searchOnce(params, job) {
+    const started = Date.now();
+    try {
+      return await searchTorrents(params);
+    } catch (err) {
+      if (job && job.cancelled || Date.now() - started >= RETRY_FAST_MS) throw err;
+      await sleep(RETRY_AFTER_MS);
+      if (job && job.cancelled) throw err;
+      return searchTorrents(params);
+    }
+  }
+  var altCache = /* @__PURE__ */ new Map();
+  function altTitles(kind, id) {
+    if (id == null) return Promise.resolve(null);
+    const key = (kind === "movie" ? "movie/" : "tv/") + id;
+    if (altCache.has(key)) return Promise.resolve(altCache.get(key));
+    const req = new Promise((resolve, reject) => {
+      lampa().Api.sources.tmdb.get(key + "/alternative_titles", {}, resolve, reject);
+    });
+    return withTimeout(req, ALT_TIMEOUT_MS, MSG_PARSER).then(
+      (json) => {
+        const alts = { latin: latinAltTitles(json), cyrillic: cyrillicAltTitles(json) };
+        altCache.set(key, alts);
+        return alts;
+      },
+      () => null
+    );
+  }
+  var resultsCache = /* @__PURE__ */ new Map();
+  async function findReleases(movie, ctx, job) {
+    const key = [movie.id, ctx.kind, ctx.seasonMap ? "map" : ctx.season].join(":");
+    const hit = resultsCache.get(key);
+    if (hit && Date.now() - hit.at < RESULTS_TTL_MS) return hit.value;
+    const cancelled = () => !!(job && job.cancelled);
+    const original = originalTitle(movie);
+    const titlesOf = (alts2) => queryTitles(movie, alts2 && alts2.latin || [], { kind: ctx.kind, cyrillic: alts2 && alts2.cyrillic });
+    let alts = ctx.kind === "anime" || !isLatinOrCyrillic(original) ? await altTitles(ctx.kind, movie.id) : void 0;
+    let titles = titlesOf(alts);
+    const params = firstQuery(movie, ctx, storageField("parse_lang"), titles);
+    const lists = [await searchOnce(params, job)];
+    let lastDone = Date.now();
+    let failed = false;
+    if (!cancelled() && lists[0].length < FEW_RESULTS && alts === void 0) {
+      alts = await altTitles(ctx.kind, movie.id);
+      titles = { ...titlesOf(alts), title: titles.title, original: titles.original };
+    }
+    for (const q of cancelled() ? [] : followUpQueries(movie, ctx, titles, lists[0].length)) {
+      const wait = QUERY_GAP_MS - (Date.now() - lastDone);
+      if (wait > 0) await sleep(wait);
+      if (cancelled()) break;
+      try {
+        lists.push(await searchOnce(q, job));
+      } catch (e) {
+        failed = true;
+      }
+      lastDone = Date.now();
+    }
+    const value = { results: mergeResults(...lists), names: titles.names, params };
+    if (!cancelled() && !failed) resultsCache.set(key, { at: Date.now(), value });
+    return value;
+  }
+
+  // src/play-progress.js
+  var WATCHED_PERCENT = 85;
+  function timelineHashString(season, episode, original) {
+    return [season, season > 10 ? ":" : "", episode, original].join("");
+  }
+  function resumeTarget(progress, view) {
+    if (!progress || !view) return null;
+    if (!(view.time > 0) || !(view.percent < WATCHED_PERCENT)) return null;
+    return { season: progress.season, episode: progress.episode };
+  }
+  function advanceWatched(target, seasons, isWatched) {
+    let t = { season: target.season, episode: target.episode };
+    for (let guard2 = 0; guard2 < 5e3 && isWatched(t.season, t.episode); guard2++) {
+      const next = nextEpisode(t, seasons);
+      if (next.season === t.season && next.episode === t.episode) break;
+      t = next;
+    }
+    return t;
+  }
+  function timelineOf(movie) {
+    const L = lampa();
+    const title = originalTitle(movie);
+    return (season, episode) => {
+      const hash = L.Utils.hash(timelineHashString(season, episode, title));
+      return L.Timeline.view(hash, L.Timeline.link(movie, season, episode));
+    };
+  }
+  function isWatchedIn(movie) {
+    const view = timelineOf(movie);
+    return (season, episode) => {
+      const v = view(season, episode);
+      return !!v && v.percent >= WATCHED_PERCENT;
+    };
+  }
+  var playingId = null;
+  function setPlaying(cardId) {
+    playingId = cardId;
+  }
+  function onPlayerStart(data) {
+    if (!playingId || !data || !data.card || data.card.id !== playingId) return;
+    if (!data.torrent_hash || !(data.season > 0) || !(data.episode > 0)) return;
+    store.progress.set(playingId, { season: data.season, episode: data.episode, hash: data.torrent_hash });
+  }
+
+  // src/play-torrserver.js
+  var INDIVIDUAL = ["vob", "m2ts"];
+  var FILES_EVERY_MS = 2e3;
+  var FILES_TRIES = 20;
+  var HASH_TIMEOUT_MS = 2e4;
+  var MSG = {
+    torrserver: "TorrServer \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
+    noFiles: "TorrServer \u043D\u0435 \u043F\u043E\u043B\u0443\u0447\u0438\u043B \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432"
+  };
+  function addTorrent(result, movie) {
+    const L = lampa();
+    const req = new Promise((resolve, reject) => {
+      L.Torserver.hash(
+        {
+          title: result.Title,
+          link: result.MagnetUri || result.Link,
+          poster: movie.img,
+          data: { lampa: true, movie }
+        },
+        (json) => json && json.hash ? resolve(json.hash) : reject(fail(MSG.torrserver)),
+        () => reject(fail(MSG.torrserver, true))
+      );
+    });
+    let late = false;
+    req.then((hash) => {
+      if (late) dropUnlessPreloaded(hash);
+    }, () => {
+    });
+    return withTimeout(req, HASH_TIMEOUT_MS, MSG.torrserver).catch((err) => {
+      late = true;
+      throw err;
+    });
+  }
+  function pollFiles(hash, job, maxTries = FILES_TRIES) {
+    const L = lampa();
+    return new Promise((resolve, reject) => {
+      let tries = 0;
+      const tick = () => {
+        if (job.cancelled) return stop(null);
+        if (++tries > maxTries) return stop(fail(MSG.noFiles));
+        L.Torserver.files(hash, (json) => {
+          if (json && json.file_stats) stop(null, json.file_stats);
+        }, () => {
+        });
+      };
+      const stop = (err, files) => {
+        clearInterval(job.timer);
+        job.timer = null;
+        job.stopPoll = null;
+        if (err) reject(err);
+        else resolve(files || null);
+      };
+      job.stopPoll = () => stop(null);
+      job.timer = setInterval(tick, FILES_EVERY_MS);
+      tick();
+    });
+  }
+  function dropUnlessPreloaded(hash) {
+    if (!hash) return;
+    if (store.preload.all().some((e) => e && e.hash === hash)) return;
+    lampa().Torserver.drop(hash);
+  }
+  var natural = (p) => p.replace(/\d+/g, (m) => m.length > 3 ? m : ("000" + m).substr(-4));
+  function parsePlays(files, movie) {
+    const L = lampa();
+    const plays = L.Torserver.clearFileName(
+      files.filter(isVideo).sort((a, b) => natural(a.path).localeCompare(natural(b.path)))
+    );
+    return plays.map((file) => ({
+      file,
+      info: L.Torserver.parse({
+        movie,
+        files: plays,
+        filename: file.path_human,
+        path: file.path,
+        is_file: INDIVIDUAL.includes(ext(file.path))
+      })
+    }));
+  }
+  function fileInfos(files, movie) {
+    const L = lampa();
+    try {
+      return parsePlays(files, movie).map(({ file, info }) => {
+        const bare = L.Torserver.parse({ movie: { ...movie, number_of_seasons: 0 }, files: [], filename: file.path_human, path: file.path, is_file: true });
+        return { id: file.id, season: info.season, episode: info.episode, defaultSeason: !(bare.season > 0) };
+      });
+    } catch (e) {
+      return null;
+    }
+  }
+  function buildPlaylist(files, movie, hash, ctx) {
+    const L = lampa();
+    const tracker = !!ctx && ctx.trackerStart > 0;
+    const defaults = new Set(tracker ? (fileInfos(files, movie) || []).filter((i) => i.defaultSeason).map((i) => i.id) : []);
+    const title = originalTitle(movie);
+    return parsePlays(files, movie).map(({ file, info: parsed }) => {
+      let info = parsed;
+      if (tracker && info.episode > 0 && (info.season === ctx.trackerSeason || defaults.has(file.id))) {
+        const episode = absoluteInPack(info.episode, ctx);
+        info = { ...info, season: 1, episode, hash: L.Utils.hash(timelineHashString(1, episode, title)) };
+      }
+      const link = info.by_title && (!info.serial || info.episode) ? L.Timeline.link(movie, info.season, info.episode) : null;
+      const timeline = L.Timeline.view(info.hash, link);
+      if (movie.runtime) timeline.duration = movie.runtime * 60;
+      return {
+        id: file.id,
+        path: file.path,
+        length: file.length,
+        season: info.season,
+        episode: info.episode,
+        title: file.path_human,
+        first_title: movie.name || movie.title,
+        card: movie,
+        url: L.Torserver.stream(file.path, hash, file.id),
+        torrent_hash: hash,
+        timeline,
+        img: "./img/img_broken.svg"
+      };
+    });
+  }
+
+  // src/queue.js
+  function createQueue(limit) {
+    let active = 0;
+    const waiting = [];
+    const next = () => {
+      if (active >= limit || !waiting.length) return;
+      active++;
+      const { job, resolve, reject } = waiting.shift();
+      Promise.resolve().then(job).then(resolve, reject).finally(() => {
+        active--;
+        next();
+      });
+    };
+    return (job) => new Promise((resolve, reject) => {
+      waiting.push({ job, resolve, reject });
+      next();
+    });
+  }
+
   // src/tmdb.js
   var HISTORY_LIMIT = 20;
   function todayIso(d = /* @__PURE__ */ new Date()) {
@@ -1167,12 +1807,22 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }
     const q = rowQuery(rowKey, today);
     if (!q) return Promise.resolve(base);
+    const keep = (c) => hasRussianTitle(c) && !(rowHidesAnime(rowKey) && isAnimeCard(c));
+    return fillRow(base, () => q, keep);
+  }
+  function loadCustomRow(custom, today = todayIso()) {
+    const base = { title: customRowTitle(custom), rowKey: customRowKey(custom.id), custom, results: [] };
+    return fillRow(base, (page) => customRowQuery(custom, page, today), customRowKeeps(custom.kind));
+  }
+  function fillRow(base, queryFor, keep) {
     let totalPages = 1;
-    const fetchPage = (page) => get(q.url, { ...q.params, page }).then((json) => {
-      if (page === 1) totalPages = json && json.total_pages || 1;
-      const keep = (c) => hasRussianTitle(c) && !(rowHidesAnime(rowKey) && isAnimeCard(c));
-      return { cards: (json && json.results || []).filter(keep), done: page >= totalPages };
-    });
+    const fetchPage = (page) => {
+      const q = queryFor(page);
+      return get(q.url, { ...q.params, page }).then((json) => {
+        if (page === 1) totalPages = json && json.total_pages || 1;
+        return { cards: (json && json.results || []).filter(keep), done: page >= totalPages };
+      });
+    };
     return fillPages(fetchPage).then(
       (results) => ({ ...base, results, total_pages: totalPages }),
       () => base
@@ -1245,7 +1895,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   }
 
   // src/episode-picker.js
-  var WATCHED_PERCENT = 85;
+  var WATCHED_PERCENT2 = 85;
   var SEASON_TIMEOUT_MS = 5e3;
   function formatDate(iso) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
@@ -1267,7 +1917,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     for (const n of numbers || []) {
       const later = !!progress && (progress.season > season || progress.season === season && progress.episode > n);
       const v = view ? view(season, n) : null;
-      if (later || v && v.percent >= WATCHED_PERCENT) out.add(n);
+      if (later || v && v.percent >= WATCHED_PERCENT2) out.add(n);
     }
     return out;
   }
@@ -1275,7 +1925,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const out = {};
     for (const n of numbers || []) {
       const v = view ? view(season, n) : null;
-      if (v && v.time > 0 && v.percent < WATCHED_PERCENT) out[n] = v.percent;
+      if (v && v.time > 0 && v.percent < WATCHED_PERCENT2) out[n] = v.percent;
     }
     return out;
   }
@@ -1506,374 +2156,12 @@ body:not(.no--animation) .lh-catalog .card--wide {
     });
   }
 
-  // src/search-query.js
-  var MIN_TITLE = 4;
-  var MAX_TITLE = 60;
-  var MIN_TWO_WORDS = 12;
-  var LONG_TITLE = 40;
-  var FEW_RESULTS = 5;
-  var FOREIGN = /(?=\p{L})[^\p{Script=Latin}\p{Script=Cyrillic}]/u;
-  function isLatinOrCyrillic(str) {
-    const s = String(str || "");
-    return /\p{L}/u.test(s) && !FOREIGN.test(s);
-  }
-  function isLatin(str) {
-    const s = String(str || "");
-    return isLatinOrCyrillic(s) && /\p{Script=Latin}/u.test(s) && !/\p{Script=Cyrillic}/u.test(s);
-  }
-  var hasCyrillic = (str) => /\p{Script=Cyrillic}/u.test(String(str || ""));
-  function shortTitle(name) {
-    const original = String(name || "").trim();
-    let s = original;
-    const cuts = [":", " \u2014 ", " \u2013 ", " ~ ", "("].map((c) => s.indexOf(c)).filter((i) => i >= 0);
-    if (cuts.length) s = s.slice(0, Math.min(...cuts)).trim();
-    if (s.length < MIN_TITLE) s = original;
-    if (s.length > MAX_TITLE) {
-      const head = s.slice(0, MAX_TITLE + 1);
-      const space = head.lastIndexOf(" ");
-      s = (space >= MIN_TITLE ? head.slice(0, space) : s.slice(0, MAX_TITLE)).trim();
-    }
-    return s;
-  }
-  function queryTitle(name, kind) {
-    const s = String(name || "").trim();
-    if (!isLatinOrCyrillic(s)) return "";
-    if (kind === "movie") return s;
-    return s.length > LONG_TITLE ? shortTitle(s) : s;
-  }
-  function altList(json) {
-    return json && (json.results || json.titles) || [];
-  }
-  function uniqueShort(titles) {
-    const out = [];
-    const seen = /* @__PURE__ */ new Set();
-    titles.forEach((title) => {
-      const s = shortTitle(title);
-      const key = s.toLowerCase();
-      if (s.length >= MIN_TITLE && !seen.has(key)) {
-        seen.add(key);
-        out.push(s);
-      }
-    });
-    return out;
-  }
-  function latinAltTitles(json) {
-    const rank = (c) => c === "JP" ? 0 : 1;
-    return uniqueShort(altList(json).filter((t) => t && (t.iso_3166_1 === "JP" || t.iso_3166_1 === "US") && isLatin(t.title)).sort((a, b) => rank(a.iso_3166_1) - rank(b.iso_3166_1)).map((t) => t.title));
-  }
-  function cyrillicAltTitles(json) {
-    return uniqueShort(altList(json).filter((t) => t && (t.iso_3166_1 === "RU" || t.iso_3166_1 === "UA") && hasCyrillic(t.title) && isLatinOrCyrillic(t.title)).map((t) => t.title));
-  }
-  function nameForms(name) {
-    const s = String(name || "").trim();
-    if (!s || !isLatinOrCyrillic(s)) return [];
-    const cuts = [":", " \u2014 ", "("].map((c) => s.indexOf(c)).filter((i) => i >= 0);
-    const head = cuts.length ? s.slice(0, Math.min(...cuts)).trim() : s;
-    const out = [head.length >= MIN_TITLE ? head : s, shortTitle(s)];
-    if (s.length > LONG_TITLE) {
-      const two = s.split(/\s+/).slice(0, 2).join(" ").replace(/[:,.(—–~]+$/, "");
-      if (two.length >= MIN_TWO_WORDS) out.push(two);
-    }
-    return out;
-  }
-  function queryTitles(card, alts = [], opts = {}) {
-    const kind = opts.kind;
-    const rawRu = card.title || card.name || "";
-    const rawOriginal = card.original_title || card.original_name || "";
-    const ru = queryTitle(rawRu, kind);
-    const original = queryTitle(rawOriginal, kind);
-    const alt = alts[0] || "";
-    const title = ru || alt || original;
-    const short = ru ? shortTitle(ru) : "";
-    let names = [];
-    const add = (n) => {
-      if (n && !names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
-    };
-    [rawRu, rawOriginal, ...alts, ...opts.cyrillic || []].forEach((n) => nameForms(n).forEach(add));
-    if (kind === "anime" && !names.some(isLatin)) names = [];
-    return { title, original: original || title, alt, short: short !== title ? short : "", names };
-  }
-  function searchParamsFor(card, ctx, parseLang, title, original) {
-    const year = String(card.first_air_date || card.release_date || "0000").slice(0, 4);
-    const combinations = {
-      df: original,
-      df_year: original + " " + year,
-      df_lg: original + " " + title,
-      df_lg_year: original + " " + title + " " + year,
-      lg: title,
-      lg_year: title + " " + year,
-      lg_df: title + " " + original,
-      lg_df_year: title + " " + original + " " + year
-    };
-    const s = ctx && ctx.kind !== "movie" && !ctx.seasonMap && Number.isInteger(ctx.season) && ctx.season >= 0 ? ctx.season : null;
-    const season = s == null ? "" : " S" + (s < 10 ? "0" : "") + s;
-    return {
-      search: (combinations[parseLang] || original || title) + season,
-      search_one: title + season,
-      search_two: original + season,
-      movie: card,
-      page: 1
-    };
-  }
-  var withTitles = (card, title, original) => ({ ...card, title, original_title: original });
-  function firstQuery(card, ctx, parseLang, t) {
-    const movie = withTitles(card, t.title, t.original);
-    return searchParamsFor(movie, ctx, parseLang, t.title, t.original);
-  }
-  var same = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
-  function secondQuery(card, ctx, t) {
-    if (!t.alt) return null;
-    if (same(t.alt, t.title) || same(t.alt, t.original)) return null;
-    const movie = withTitles(card, t.title, t.alt);
-    return searchParamsFor(movie, ctx, "df", t.title, t.alt);
-  }
-  function shortQuery(card, ctx, t) {
-    if (!t.short || same(t.short, t.title)) return null;
-    const movie = withTitles(card, t.short, t.short);
-    return searchParamsFor(movie, ctx, "lg", t.short, t.short);
-  }
-  var needSecond = (kind, count) => kind === "anime" || count < FEW_RESULTS;
-  function followUpQueries(card, ctx, t, firstCount) {
-    const out = [];
-    if (firstCount < FEW_RESULTS) out.push(shortQuery(card, ctx, t));
-    if (needSecond(ctx.kind, firstCount)) out.push(secondQuery(card, ctx, t));
-    return out.filter(Boolean);
-  }
-  function mergeResults(...lists) {
-    const out = [];
-    const links = /* @__PURE__ */ new Set();
-    const titles = /* @__PURE__ */ new Set();
-    for (const list of lists) {
-      for (const r of list || []) {
-        if (!r) continue;
-        const link = r.MagnetUri || r.Link || "";
-        const title = String(r.Title || "").trim().toLowerCase();
-        if (link && links.has(link) || title && titles.has(title)) continue;
-        if (link) links.add(link);
-        if (title) titles.add(title);
-        out.push(r);
-      }
-    }
-    return out;
-  }
-
-  // src/play.js
-  var ANIMATION = 16;
-  var VIDEO = ["asf", "wmv", "divx", "avi", "mp4", "m4v", "mov", "3gp", "3g2", "mkv", "trp", "tp", "mts", "mpg", "mpeg", "dat", "vob", "rm", "rmvb", "m2ts", "ts"];
-  var INDIVIDUAL = ["vob", "m2ts"];
-  var FILES_EVERY_MS = 2e3;
-  var WATCHED_PERCENT2 = 85;
-  var FILES_TRIES = 20;
-  var FILES_TRIES_EXTRA = 10;
-  var HASH_TIMEOUT_MS = 2e4;
-  var MAX_CANDIDATES = 3;
-  var RUN_TIMEOUT_MS = 9e4;
-  var QUERY_GAP_MS = 1200;
-  var RETRY_FAST_MS = 500;
-  var RETRY_AFTER_MS = 2e3;
-  var RESULTS_TTL_MS = 6e4;
-  var ALT_TIMEOUT_MS = 5e3;
-  var MSG = {
-    search: "\u0418\u0449\u0443 \u0440\u0430\u0437\u0434\u0430\u0447\u0443\u2026",
-    server: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u0432 TorrServer\u2026",
-    files: "\u0416\u0434\u0443 \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432\u2026",
-    filesOf: (i, n) => `\u0416\u0434\u0443 \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432 (${i}/${n})\u2026`,
-    none: "\u041F\u043E\u0434\u0445\u043E\u0434\u044F\u0449\u0435\u0439 \u0440\u0430\u0437\u0434\u0430\u0447\u0438 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
-    noFile: "\u041D\u0443\u0436\u043D\u043E\u0439 \u0441\u0435\u0440\u0438\u0438 \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0435 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
-    notYet: (n) => `\u0421\u0435\u0440\u0438\u044F ${n} \u0435\u0449\u0451 \u043D\u0435 \u043F\u043E\u044F\u0432\u0438\u043B\u0430\u0441\u044C \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0430\u0445`,
-    retry: (i, n) => `\u041F\u0440\u043E\u0431\u0443\u044E \u0434\u0440\u0443\u0433\u0443\u044E \u0440\u0430\u0437\u0434\u0430\u0447\u0443 (${i}/${n})\u2026`,
-    timeout: "\u0420\u0430\u0437\u0434\u0430\u0447\u0430 \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u043B\u0430\u0441\u044C \u0432\u043E\u0432\u0440\u0435\u043C\u044F, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
-    parser: "\u041F\u0430\u0440\u0441\u0435\u0440 \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B",
-    torrserver: "TorrServer \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
-    noServer: "TorrServer \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D",
-    noFiles: "TorrServer \u043D\u0435 \u043F\u043E\u043B\u0443\u0447\u0438\u043B \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432",
-    unknown: "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0440\u0430\u0437\u0434\u0430\u0447\u0443",
-    starting: (label) => `\u0417\u0430\u043F\u0443\u0441\u043A\u0430\u044E: ${label}`
-  };
-  function releaseLabel(result) {
-    if (!result) return "";
-    const p = parseTitle(result.Title);
-    const gib = (Number(result.Size) || 0) / 1024 ** 3;
-    const size = gib >= 0.1 ? `${gib.toFixed(1).replace(".", ",")} \u0413\u0411` : "";
-    return [p.resolution ? `${p.resolution}p` : "", size, p.studio || ""].filter(Boolean).join(" \xB7 ");
-  }
-  var PlayError = class extends Error {
-    constructor(msg, fatal = false) {
-      super(msg);
-      this.fatal = fatal;
-    }
-  };
-  var fail = (msg, fatal) => new PlayError(msg, fatal);
-  var ext = (path) => String(path || "").split(".").pop().toLowerCase();
-  var isVideo = (f) => VIDEO.includes(ext(f.path));
-  function genreIds(card) {
-    if (!card) return [];
-    if (Array.isArray(card.genre_ids) && card.genre_ids.length) return card.genre_ids;
-    return (Array.isArray(card.genres) ? card.genres : []).map((g) => g && g.id).filter((id) => id != null);
-  }
-  function progressAfterOutcome(prev, picked, outcome) {
-    return outcome === "played" ? picked : prev;
-  }
-  function detectKind(card) {
-    if (!card || !card.original_name) return "movie";
-    const jp = (card.origin_country || []).includes("JP");
-    return jp && genreIds(card).includes(ANIMATION) ? "anime" : "tv";
-  }
-  function titleHasSeason(title) {
-    const p = parseTitle(title);
-    return !!(p.seasons || p.sxeRange || p.episode && p.episode.season != null);
-  }
-  function trackerFields(o) {
-    if (!o || o.trackerSeason == null) return {};
-    return { trackerSeason: o.trackerSeason, trackerEpisode: o.trackerEpisode, trackerStart: o.trackerStart, trackerCount: o.trackerCount };
-  }
-  function withTracker(ctx, map, keepMap = true) {
-    if (!ctx || !map) return ctx;
-    const { trackerSeason, trackerEpisode, trackerStart, trackerCount, ...rest } = ctx;
-    const out = keepMap ? { ...rest, seasonMap: map } : rest;
-    const pos = trackerPosition(map, ctx.absolute);
-    return pos ? { ...out, trackerSeason: pos.season, trackerEpisode: pos.episode, trackerStart: pos.start, trackerCount: pos.count } : out;
-  }
-  function inferTracker(ctx, results, names) {
-    if (!ctx || ctx.trackerSeason != null || ctx.seasonMap || !(ctx.inferTotal > 0)) return ctx;
-    const map = inferSeasonMap(results, { names, total: ctx.inferTotal });
-    return map ? withTracker(ctx, map, false) : ctx;
-  }
-  function packNumbering(files, ctx) {
-    if (!ctx || ctx.trackerSeason == null || !(ctx.trackerStart > 0)) return null;
-    const count = ctx.trackerCount > 0 ? ctx.trackerCount : Infinity;
-    const bare = (files || []).filter(isVideo).map((f) => parseEpisode(f.path)).filter((ep) => ep.season == null && ep.absolute != null);
-    return bare.some((ep) => ep.absolute > count) ? "absolute" : "season";
-  }
-  function absoluteInPack(episode, ctx) {
-    if (!(episode > 0) || !ctx || !(ctx.trackerStart > 0)) return episode;
-    return ctx.trackerStart - 1 + episode;
-  }
-  function pickFile(files, ctx, infos) {
-    const videos = (files || []).filter(isVideo);
-    if (!videos.length) return null;
-    if (ctx.trackerSeason != null && ctx.kind !== "movie") {
-      const { trackerSeason, trackerEpisode, trackerStart, trackerCount, ...plain } = ctx;
-      const sxe = videos.find((f) => {
-        const ep = parseEpisode(f.path);
-        return ep.season != null && ep.season === trackerSeason && ep.episode === trackerEpisode;
-      });
-      if (sxe) return sxe;
-      if (packNumbering(videos, ctx) === "absolute") return pickFile(videos, { ...plain, titleHasSeason: false }, infos);
-      return pickFile(videos, { ...plain, season: trackerSeason, episode: trackerEpisode, absolute: trackerEpisode, titleHasSeason: true }, infos);
-    }
-    if (ctx.kind === "movie") {
-      return videos.reduce((best, f) => (f.length || 0) > (best.length || 0) ? f : best);
-    }
-    const parsed = videos.map((f) => ({ f, ep: parseEpisode(f.path) }));
-    const bySxe = parsed.find(({ ep }) => ep.season != null && ep.season === ctx.season && ep.episode === ctx.episode);
-    if (bySxe) return bySxe.f;
-    const bare = parsed.filter(({ ep }) => ep.season == null && ep.absolute != null);
-    const absFirst = ctx.kind === "anime" && !ctx.titleHasSeason;
-    const numbers = absFirst ? [ctx.absolute, ctx.episode] : [ctx.episode, ctx.absolute];
-    const infoOf = (f) => Array.isArray(infos) ? infos.find((i) => i && i.id === f.id) : null;
-    const otherSeason = (f) => {
-      const i = infoOf(f);
-      return !!i && !i.defaultSeason && i.season != null && i.season !== ctx.season;
-    };
-    let ambiguous = false;
-    for (const n of numbers) {
-      if (n == null) continue;
-      const hits = bare.filter(({ ep }) => ep.absolute === n);
-      if (hits.length === 1) {
-        if (!otherSeason(hits[0].f)) return hits[0].f;
-        ambiguous = true;
-        break;
-      }
-      if (hits.length > 1) {
-        ambiguous = true;
-        break;
-      }
-    }
-    if (Array.isArray(infos)) {
-      const ids = new Set(videos.map((f) => f.id));
-      const hits = infos.filter((i) => i && ids.has(i.id) && i.season === ctx.season && i.episode === ctx.episode);
-      if (hits.length === 1) return videos.find((f) => f.id === hits[0].id);
-    }
-    if (ambiguous) return null;
-    return videos.length === 1 && parsed[0].ep.episode == null ? videos[0] : null;
-  }
-  function nextCandidates(scored, max = MAX_CANDIDATES) {
-    const out = [];
-    const seen = /* @__PURE__ */ new Set();
-    for (const s of scored || []) {
-      if (out.length >= max) break;
-      if (!s || s.rejected || !s.result) continue;
-      const link = s.result.MagnetUri || s.result.Link || s.result.Title;
-      if (link && seen.has(link)) continue;
-      if (link) seen.add(link);
-      out.push(s.result);
-    }
-    return out;
-  }
-  async function tryCandidates(candidates2, attempt, { cancelled = () => false, onMiss = () => {
-  } } = {}) {
-    let prevSeen = false;
-    for (let i = 0; i < (candidates2 || []).length; i++) {
-      let outcome;
-      try {
-        outcome = await attempt(candidates2[i], i);
-      } catch (err) {
-        if (cancelled() || !(err instanceof PlayError) || err.fatal) throw err;
-        outcome = "nofile";
-      }
-      if (outcome === "played" || outcome === "cancelled") return outcome;
-      if (cancelled()) return "cancelled";
-      if (outcome === "nofile-prev") prevSeen = true;
-      onMiss();
-    }
-    return prevSeen ? "nofile-prev" : "nofile";
-  }
-  function previousEpisodeCtx(ctx) {
-    if (!ctx || ctx.kind === "movie" || !(ctx.episode > 1)) return null;
-    const prev = { ...ctx, episode: ctx.episode - 1, absolute: ctx.absolute > 1 ? ctx.absolute - 1 : ctx.absolute };
-    if (ctx.trackerSeason == null) return prev;
-    if (!(ctx.trackerEpisode > 1)) return null;
-    return { ...prev, trackerEpisode: ctx.trackerEpisode - 1 };
-  }
-  function resumeTarget(progress, view) {
-    if (!progress || !view) return null;
-    if (!(view.time > 0) || !(view.percent < WATCHED_PERCENT2)) return null;
-    return { season: progress.season, episode: progress.episode };
-  }
-  function normalizeTitles(card) {
-    const out = { ...card };
-    if (!out.title && out.name) out.title = out.name;
-    if (!out.original_title && out.original_name) out.original_title = out.original_name;
-    return out;
-  }
-  function advanceWatched(target, seasons, isWatched) {
-    let t = { season: target.season, episode: target.episode };
-    for (let guard2 = 0; guard2 < 5e3 && isWatched(t.season, t.episode); guard2++) {
-      const next = nextEpisode(t, seasons);
-      if (next.season === t.season && next.episode === t.episode) break;
-      t = next;
-    }
-    return t;
-  }
-  function timelineHashString(season, episode, originalTitle) {
-    return [season, season > 10 ? ":" : "", episode, originalTitle].join("");
-  }
-  function buildSearchParams(card, ctx, parseLang) {
-    const title = card.title || card.name || "";
-    const original = card.original_title || card.original_name || title;
-    return searchParamsFor(card, ctx, parseLang, title, original);
-  }
-  function withTimeout(promise, ms, msg) {
-    let timer;
-    const t = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(fail(msg)), ms);
-    });
-    return Promise.race([promise, t]).finally(() => clearTimeout(timer));
-  }
+  // src/play-target.js
   var tmdbDetails = (kind, id) => kind === "movie" ? new Promise((resolve, reject) => lampa().Api.sources.tmdb.get(`movie/${id}`, {}, resolve, reject)) : loadTv(id);
+  function withPoster(movie) {
+    return !movie.img && movie.poster_path ? { ...movie, img: lampa().Api.img(movie.poster_path) } : movie;
+  }
   async function fullCard(card, kind) {
-    const L = lampa();
     let movie = card;
     let details = null;
     if (kind !== "movie" || !Array.isArray(card.genres)) {
@@ -1888,211 +2176,15 @@ body:not(.no--animation) .lh-catalog .card--wide {
     } else if (!Array.isArray(card.genres)) {
       movie = { ...card, genres: [] };
     }
-    if (!movie.img && movie.poster_path) movie = { ...movie, img: L.Api.img(movie.poster_path) };
-    return { movie: normalizeTitles(movie), details };
-  }
-  function searchTorrents(params) {
-    const L = lampa();
-    const req = new Promise((resolve, reject) => {
-      L.Parser.get(params, (data) => resolve(data && data.Results || []), () => reject(fail(MSG.parser)));
-    });
-    return withTimeout(req, LIMITS.searchTimeoutMs, MSG.parser);
-  }
-  var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  async function searchOnce(params, job) {
-    const started = Date.now();
-    try {
-      return await searchTorrents(params);
-    } catch (err) {
-      if (job && job.cancelled || Date.now() - started >= RETRY_FAST_MS) throw err;
-      await sleep(RETRY_AFTER_MS);
-      if (job && job.cancelled) throw err;
-      return searchTorrents(params);
-    }
-  }
-  var altCache = /* @__PURE__ */ new Map();
-  function altTitles(kind, id) {
-    if (id == null) return Promise.resolve(null);
-    const key = (kind === "movie" ? "movie/" : "tv/") + id;
-    if (altCache.has(key)) return Promise.resolve(altCache.get(key));
-    const req = new Promise((resolve, reject) => {
-      lampa().Api.sources.tmdb.get(key + "/alternative_titles", {}, resolve, reject);
-    });
-    return withTimeout(req, ALT_TIMEOUT_MS, MSG.parser).then(
-      (json) => {
-        const alts = { latin: latinAltTitles(json), cyrillic: cyrillicAltTitles(json) };
-        altCache.set(key, alts);
-        return alts;
-      },
-      () => null
-    );
-  }
-  var resultsCache = /* @__PURE__ */ new Map();
-  async function findReleases(movie, ctx, job) {
-    const key = [movie.id, ctx.kind, ctx.seasonMap ? "map" : ctx.season].join(":");
-    const hit = resultsCache.get(key);
-    if (hit && Date.now() - hit.at < RESULTS_TTL_MS) return hit.value;
-    const cancelled = () => !!(job && job.cancelled);
-    const original = movie.original_title || movie.original_name || "";
-    const titlesOf = (alts2) => queryTitles(movie, alts2 && alts2.latin || [], { kind: ctx.kind, cyrillic: alts2 && alts2.cyrillic });
-    let alts = ctx.kind === "anime" || !isLatinOrCyrillic(original) ? await altTitles(ctx.kind, movie.id) : void 0;
-    let titles = titlesOf(alts);
-    const params = firstQuery(movie, ctx, storageField("parse_lang"), titles);
-    const lists = [await searchOnce(params, job)];
-    let lastDone = Date.now();
-    let failed = false;
-    if (!cancelled() && lists[0].length < FEW_RESULTS && alts === void 0) {
-      alts = await altTitles(ctx.kind, movie.id);
-      titles = { ...titlesOf(alts), title: titles.title, original: titles.original };
-    }
-    for (const q of cancelled() ? [] : followUpQueries(movie, ctx, titles, lists[0].length)) {
-      const wait = QUERY_GAP_MS - (Date.now() - lastDone);
-      if (wait > 0) await sleep(wait);
-      if (cancelled()) break;
-      try {
-        lists.push(await searchOnce(q, job));
-      } catch (e) {
-        failed = true;
-      }
-      lastDone = Date.now();
-    }
-    const value = { results: mergeResults(...lists), names: titles.names, params };
-    if (!cancelled() && !failed) resultsCache.set(key, { at: Date.now(), value });
-    return value;
-  }
-  function addTorrent(result, movie) {
-    const L = lampa();
-    const req = new Promise((resolve, reject) => {
-      L.Torserver.hash(
-        {
-          title: result.Title,
-          link: result.MagnetUri || result.Link,
-          poster: movie.img,
-          data: { lampa: true, movie }
-        },
-        (json) => json && json.hash ? resolve(json.hash) : reject(fail(MSG.torrserver)),
-        () => reject(fail(MSG.torrserver, true))
-      );
-    });
-    return withTimeout(req, HASH_TIMEOUT_MS, MSG.torrserver);
-  }
-  function pollFiles(hash, job, maxTries = FILES_TRIES) {
-    const L = lampa();
-    return new Promise((resolve, reject) => {
-      let tries = 0;
-      const tick = () => {
-        if (job.cancelled) return stop(null);
-        if (++tries > maxTries) return stop(fail(MSG.noFiles));
-        L.Torserver.files(hash, (json) => {
-          if (json && json.file_stats) stop(null, json.file_stats);
-        }, () => {
-        });
-      };
-      const stop = (err, files) => {
-        clearInterval(job.timer);
-        job.timer = null;
-        if (err) reject(err);
-        else resolve(files || null);
-      };
-      job.timer = setInterval(tick, FILES_EVERY_MS);
-      tick();
-    });
-  }
-  var natural = (p) => p.replace(/\d+/g, (m) => m.length > 3 ? m : ("000" + m).substr(-4));
-  function parsePlays(files, movie) {
-    const L = lampa();
-    const plays = L.Torserver.clearFileName(
-      files.filter(isVideo).sort((a, b) => natural(a.path).localeCompare(natural(b.path)))
-    );
-    return plays.map((file) => ({
-      file,
-      info: L.Torserver.parse({
-        movie,
-        files: plays,
-        filename: file.path_human,
-        path: file.path,
-        is_file: INDIVIDUAL.includes(ext(file.path))
-      })
-    }));
-  }
-  function fileInfos(files, movie) {
-    const L = lampa();
-    try {
-      return parsePlays(files, movie).map(({ file, info }) => {
-        const bare = L.Torserver.parse({ movie: { ...movie, number_of_seasons: 0 }, files: [], filename: file.path_human, path: file.path, is_file: true });
-        return { id: file.id, season: info.season, episode: info.episode, defaultSeason: !(bare.season > 0) };
-      });
-    } catch (e) {
-      return null;
-    }
-  }
-  function buildPlaylist(files, movie, hash, ctx) {
-    const L = lampa();
-    const tracker = !!ctx && ctx.trackerStart > 0;
-    const defaults = new Set(tracker ? (fileInfos(files, movie) || []).filter((i) => i.defaultSeason).map((i) => i.id) : []);
-    const title = movie.original_title || movie.original_name || "";
-    return parsePlays(files, movie).map(({ file, info: parsed }) => {
-      let info = parsed;
-      if (tracker && info.episode > 0 && (info.season === ctx.trackerSeason || defaults.has(file.id))) {
-        const episode = absoluteInPack(info.episode, ctx);
-        info = { ...info, season: 1, episode, hash: L.Utils.hash(timelineHashString(1, episode, title)) };
-      }
-      const link = info.by_title && (!info.serial || info.episode) ? L.Timeline.link(movie, info.season, info.episode) : null;
-      const timeline = L.Timeline.view(info.hash, link);
-      if (movie.runtime) timeline.duration = movie.runtime * 60;
-      return {
-        id: file.id,
-        path: file.path,
-        length: file.length,
-        season: info.season,
-        episode: info.episode,
-        title: file.path_human,
-        first_title: movie.name || movie.title,
-        card: movie,
-        url: L.Torserver.stream(file.path, hash, file.id),
-        torrent_hash: hash,
-        timeline,
-        img: "./img/img_broken.svg"
-      };
-    });
-  }
-  function openNativeList(params) {
-    const L = lampa();
-    L.Activity.push({ url: "", title: L.Lang.translate("title_torrents"), component: "torrents", ...params });
-  }
-  function chooseManually(card) {
-    if (!card || current) return;
-    const kind = detectKind(card);
-    const titles = queryTitles(normalizeTitles(card), [], { kind });
-    openNativeList(firstQuery(card, { kind }, storageField("parse_lang"), titles));
-  }
-  var current = null;
-  var isBusy = () => !!current;
-  var playingId = null;
-  function timelineOf(movie) {
-    const L = lampa();
-    const title = movie.original_title || movie.original_name || "";
-    return (season, episode) => {
-      const hash = L.Utils.hash(timelineHashString(season, episode, title));
-      return L.Timeline.view(hash, L.Timeline.link(movie, season, episode));
-    };
-  }
-  function isWatchedIn(movie) {
-    const view = timelineOf(movie);
-    return (season, episode) => {
-      const v = view(season, episode);
-      return !!v && v.percent >= WATCHED_PERCENT2;
-    };
-  }
-  function dropUnlessPreloaded(hash) {
-    if (!hash) return;
-    if (store.preload.all().some((e) => e && e.hash === hash)) return;
-    lampa().Torserver.drop(hash);
+    return { movie: normalizeTitles(withPoster(movie)), details };
   }
   async function resolveTarget(card) {
     const first = detectKind(card);
     const { movie, details } = await fullCard(card, first);
-    if (first === "movie") return { kind: first, ctx: { kind: first }, movie, tv: null };
+    if (first === "movie") {
+      const year = Number(String(movie.release_date || "").slice(0, 4)) || 0;
+      return { kind: first, ctx: { kind: first, year }, movie, tv: null };
+    }
     const kind = details && Array.isArray(details.genres) ? detectKind({
       original_name: movie.original_name,
       origin_country: details.origin_country || movie.origin_country,
@@ -2133,6 +2225,44 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const next = { ...ctx, season: picked.season, episode: picked.episode, absolute: absoluteEpisode(seasons, picked.season, picked.episode) };
     return seasonMap ? withTracker(next, seasonMap) : next;
   }
+
+  // src/play-candidates.js
+  var MAX_CANDIDATES = 3;
+  function nextCandidates(scored, max = MAX_CANDIDATES) {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const s of scored || []) {
+      if (out.length >= max) break;
+      if (!s || s.rejected || !s.result) continue;
+      const link = s.result.MagnetUri || s.result.Link || s.result.Title;
+      if (link && seen.has(link)) continue;
+      if (link) seen.add(link);
+      out.push(s.result);
+    }
+    return out;
+  }
+  async function tryCandidates(candidates2, attempt, { cancelled = () => false, onMiss = () => {
+  } } = {}) {
+    let prevSeen = false;
+    for (let i = 0; i < (candidates2 || []).length; i++) {
+      let outcome;
+      try {
+        outcome = await attempt(candidates2[i], i);
+      } catch (err) {
+        if (cancelled() || !(err instanceof PlayError) || err.fatal) throw err;
+        outcome = "nofile";
+      }
+      if (outcome === "played" || outcome === "cancelled") return outcome;
+      if (cancelled()) return "cancelled";
+      if (outcome === "nofile-prev") prevSeen = true;
+      onMiss();
+    }
+    return prevSeen ? "nofile-prev" : "nofile";
+  }
+
+  // src/play-job.js
+  var current = null;
+  var isBusy = () => !!current;
   function beginJob(text, onCancel) {
     const L = lampa();
     if (current) return null;
@@ -2151,8 +2281,10 @@ body:not(.no--animation) .lh-catalog .card--wide {
       job.loading = true;
       L.Loading.start(cancel, t);
     };
+    job.isCurrent = () => current === job;
     job.finish = () => {
-      if (job.timer) clearInterval(job.timer);
+      if (job.stopPoll) job.stopPoll();
+      else if (job.timer) clearInterval(job.timer);
       if (job.deadline) clearTimeout(job.deadline);
       if (current === job) current = null;
       if (job.loading) L.Loading.stop();
@@ -2161,7 +2293,35 @@ body:not(.no--animation) .lh-catalog .card--wide {
     L.Loading.start(cancel, text);
     return job;
   }
-  async function playFiles(job, card, movie, ctx, maxTries, filesText = MSG.files) {
+
+  // src/play-run.js
+  var FILES_TRIES_EXTRA = 10;
+  var RUN_TIMEOUT_MS = 9e4;
+  var MSG2 = {
+    search: "\u0418\u0449\u0443 \u0440\u0430\u0437\u0434\u0430\u0447\u0443\u2026",
+    server: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u0432 TorrServer\u2026",
+    files: "\u0416\u0434\u0443 \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432\u2026",
+    filesOf: (i, n) => `\u0416\u0434\u0443 \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432 (${i}/${n})\u2026`,
+    none: "\u041F\u043E\u0434\u0445\u043E\u0434\u044F\u0449\u0435\u0439 \u0440\u0430\u0437\u0434\u0430\u0447\u0438 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
+    noFile: "\u041D\u0443\u0436\u043D\u043E\u0439 \u0441\u0435\u0440\u0438\u0438 \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0435 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
+    notYet: (n) => `\u0421\u0435\u0440\u0438\u044F ${n} \u0435\u0449\u0451 \u043D\u0435 \u043F\u043E\u044F\u0432\u0438\u043B\u0430\u0441\u044C \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0430\u0445`,
+    retry: (i, n) => `\u041F\u0440\u043E\u0431\u0443\u044E \u0434\u0440\u0443\u0433\u0443\u044E \u0440\u0430\u0437\u0434\u0430\u0447\u0443 (${i}/${n})\u2026`,
+    timeout: "\u0420\u0430\u0437\u0434\u0430\u0447\u0430 \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u043B\u0430\u0441\u044C \u0432\u043E\u0432\u0440\u0435\u043C\u044F, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
+    noServer: "TorrServer \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D",
+    unknown: "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0440\u0430\u0437\u0434\u0430\u0447\u0443",
+    starting: (label) => `\u0417\u0430\u043F\u0443\u0441\u043A\u0430\u044E: ${label}`
+  };
+  function showError(err) {
+    if (!(err instanceof PlayError)) console.error("lampa-home play", err);
+    lampa().Noty.show(err instanceof PlayError ? err.message : MSG2.unknown);
+  }
+  function chooseManually(card) {
+    if (!card || isBusy()) return;
+    const kind = detectKind(card);
+    const titles = queryTitles(normalizeTitles(card), [], { kind });
+    openNativeList(firstQuery(card, { kind }, storageField("parse_lang"), titles));
+  }
+  async function playFiles(job, card, movie, ctx, maxTries, filesText = MSG2.files) {
     const L = lampa();
     L.Loading.setText(filesText);
     const files = await pollFiles(job.hash, job, maxTries);
@@ -2176,12 +2336,12 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }
     job.finish();
     if (movie.id) L.Favorite.add("history", { ...movie, genre_ids: genreIds(movie) }, 100);
-    playingId = ctx.kind === "movie" ? null : card.id;
+    setPlaying(ctx.kind === "movie" ? null : card.id);
     const start3 = { ...element, playlist };
     L.Player.play(start3);
     L.Player.playlist(playlist);
     L.Player.callback(() => L.Controller.toggle("content"));
-    if (job.pick) L.Noty.show(MSG.starting(releaseLabel(job.pick)));
+    if (job.pick) L.Noty.show(MSG2.starting(releaseLabel(job.pick)));
     if (ctx.kind !== "movie") {
       store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: job.hash });
     }
@@ -2189,19 +2349,19 @@ body:not(.no--animation) .lh-catalog .card--wide {
   }
   async function run(card) {
     const L = lampa();
-    if (!card || current) return;
-    const job = beginJob(MSG.search, (j) => dropUnlessPreloaded(j.hash));
+    if (!card || isBusy()) return;
+    const job = beginJob(MSG2.search, (j) => dropUnlessPreloaded(j.hash));
     const finish = job.finish;
     const kind = detectKind(card);
-    let params = buildSearchParams(card, { kind }, storageField("parse_lang"));
+    let params = listParams(card, { kind });
     const arm = () => {
       clearTimeout(job.deadline);
       job.deadline = setTimeout(() => {
-        if (current !== job || job.cancelled) return;
+        if (!job.isCurrent() || job.cancelled) return;
         job.cancelled = true;
         dropUnlessPreloaded(job.hash);
         finish();
-        L.Noty.show(MSG.timeout);
+        L.Noty.show(MSG2.timeout);
         openNativeList(params);
       }, RUN_TIMEOUT_MS);
     };
@@ -2222,16 +2382,16 @@ body:not(.no--animation) .lh-catalog .card--wide {
         if (!picked || picked === "list") {
           job.cancelled = true;
           finish();
-          if (picked === "list") openNativeList(buildSearchParams(movie, ctx, storageField("parse_lang")));
+          if (picked === "list") openNativeList(listParams(movie, ctx));
           return;
         }
         ctx = picked;
         rollback = { prev: store.progress.get(card.id) };
         store.progress.set(card.id, { season: ctx.season, episode: ctx.episode, hash: null });
-        job.restart(MSG.search);
+        job.restart(MSG2.search);
         arm();
       }
-      params = buildSearchParams(movie, ctx, storageField("parse_lang"));
+      params = listParams(movie, ctx);
       const found = await findReleases(movie, ctx, job);
       if (job.cancelled) return;
       params = { ...params, search: found.params.search };
@@ -2239,13 +2399,13 @@ body:not(.no--animation) .lh-catalog .card--wide {
       const candidates2 = nextCandidates(selectTorrent(found.results, { ...ctx, names: found.names }).scored);
       if (!candidates2.length) {
         finish();
-        L.Noty.show(MSG.none);
+        L.Noty.show(MSG2.none);
         return openNativeList(params);
       }
-      if (!L.Torserver.url()) throw fail(MSG.noServer, true);
+      if (!L.Torserver.url()) throw fail(MSG2.noServer, true);
       const n = candidates2.length;
       const outcome = await tryCandidates(candidates2, async (cand, i) => {
-        L.Loading.setText(i === 0 ? MSG.server : MSG.retry(i + 1, n));
+        L.Loading.setText(i === 0 ? MSG2.server : MSG2.retry(i + 1, n));
         const hash = await addTorrent(cand, movie);
         job.hash = hash;
         job.pick = cand;
@@ -2259,7 +2419,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
           movie,
           { ...ctx, titleHasSeason: titleHasSeason(cand.Title) },
           i === 0 ? FILES_TRIES : FILES_TRIES_EXTRA,
-          i === 0 ? MSG.files : MSG.filesOf(i + 1, n)
+          i === 0 ? MSG2.files : MSG2.filesOf(i + 1, n)
         );
       }, {
         cancelled: () => job.cancelled,
@@ -2271,19 +2431,17 @@ body:not(.no--animation) .lh-catalog .card--wide {
       played = outcome === "played";
       if (outcome === "played" || outcome === "cancelled" || job.cancelled) return;
       finish();
-      L.Noty.show(outcome === "nofile-prev" ? MSG.notYet(ctx.episode) : MSG.noFile);
+      L.Noty.show(outcome === "nofile-prev" ? MSG2.notYet(ctx.episode) : MSG2.noFile);
       return openNativeList(params);
     } catch (err) {
       if (job.cancelled) return;
       dropUnlessPreloaded(job.hash);
       finish();
-      const msg = err instanceof PlayError ? err.message : MSG.unknown;
-      if (!(err instanceof PlayError)) console.error("lampa-home play", err);
-      L.Noty.show(msg);
+      showError(err);
       openNativeList(params);
     } finally {
       if (rollback && !played) {
-        const prev = progressAfterOutcome(rollback.prev, null, "failed");
+        const { prev } = rollback;
         if (prev) store.progress.set(card.id, { season: prev.season, episode: prev.episode, hash: prev.hash });
         else store.progress.clear(card.id);
       }
@@ -2291,30 +2449,30 @@ body:not(.no--animation) .lh-catalog .card--wide {
   }
   async function startFromHash(hash, card, ctx, title) {
     const L = lampa();
-    if (!hash || !card || current) return;
-    const job = beginJob(MSG.files, () => {
+    if (!hash || !card || isBusy()) return;
+    const job = beginJob(MSG2.files, () => {
     });
     job.hash = hash;
     try {
-      if (!L.Torserver.url()) throw fail(MSG.noServer, true);
+      if (!L.Torserver.url()) throw fail(MSG2.noServer, true);
       const kind = ctx && ctx.kind || detectKind(card);
-      let movie = normalizeTitles(card);
-      if (!movie.img && movie.poster_path) movie = { ...movie, img: L.Api.img(movie.poster_path) };
+      let movie = withPoster(normalizeTitles(card));
       if (kind !== "movie" && !movie.number_of_seasons) {
         movie = { ...movie, number_of_seasons: Math.max(1, ctx && ctx.season || 1) };
       }
       const outcome = await playFiles(job, card, movie, { kind, ...ctx, titleHasSeason: titleHasSeason(title) });
       if (outcome === "nofile" || outcome === "nofile-prev") {
         job.finish();
-        L.Noty.show(MSG.noFile);
+        L.Noty.show(MSG2.noFile);
       }
     } catch (err) {
       if (job.cancelled) return;
       job.finish();
-      if (!(err instanceof PlayError)) console.error("lampa-home play", err);
-      L.Noty.show(err instanceof PlayError ? err.message : MSG.unknown);
+      showError(err);
     }
   }
+
+  // src/play.js
   var PLAY_ICON = '<svg viewBox="0 0 28 29" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14.5" r="13" stroke="currentColor" stroke-width="2.7"></circle><path d="M18.0739 13.634C18.7406 14.0189 18.7406 14.9811 18.0739 15.366L11.751 19.0166C11.0843 19.4015 10.251 18.9204 10.251 18.1506L10.251 10.8494C10.251 10.0796 11.0843 9.5985 11.751 9.9834L18.0739 13.634Z" fill="currentColor"></path></svg>';
   function addButton(e) {
     const card = e.data && e.data.movie;
@@ -2326,11 +2484,6 @@ body:not(.no--animation) .lh-catalog .card--wide {
     btn.on("hover:enter", () => run(card));
     btn.on("hover:long", () => chooseManually(card));
     row.first().prepend(btn);
-  }
-  function onPlayerStart(data) {
-    if (!playingId || !data || !data.card || data.card.id !== playingId) return;
-    if (!data.torrent_hash || !(data.season > 0) || !(data.episode > 0)) return;
-    store.progress.set(playingId, { season: data.season, episode: data.episode, hash: data.torrent_hash });
   }
   function init() {
     const L = lampa();
@@ -2350,7 +2503,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var COLS = 4;
   var FIRST_YEAR = 2010;
   var DECADES = ["2000-2009", "1990-1999"];
-  var KIND_TITLES = { movie: "\u0424\u0438\u043B\u044C\u043C\u044B", tv: "\u0421\u0435\u0440\u0438\u0430\u043B\u044B", cartoon: "\u041C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B", anime: "\u0410\u043D\u0438\u043C\u0435" };
+  var KIND_TITLES2 = { movie: "\u0424\u0438\u043B\u044C\u043C\u044B", tv: "\u0421\u0435\u0440\u0438\u0430\u043B\u044B", cartoon: "\u041C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B", anime: "\u0410\u043D\u0438\u043C\u0435" };
   var SORT_TITLES = { new: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u043E\u0432\u044B\u0435", rating: "\u041F\u043E \u0440\u0435\u0439\u0442\u0438\u043D\u0433\u0443" };
   var FRESH = { genre: null, year: null, sort: "new", lang: null };
   var ROW_PRESETS = {
@@ -2555,7 +2708,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   function open(kind, preset) {
     if (preset) store.filters.set(kind, applyPreset(store.filters.get(kind), preset));
     const lang = preset && preset.lang || null;
-    const title = lang === "ru" ? kind === "tv" ? "\u0420\u0443\u0441\u0441\u043A\u0438\u0435 \u0441\u0435\u0440\u0438\u0430\u043B\u044B" : "\u0420\u0443\u0441\u0441\u043A\u043E\u0435" : KIND_TITLES[kind];
+    const title = lang === "ru" ? kind === "tv" ? "\u0420\u0443\u0441\u0441\u043A\u0438\u0435 \u0441\u0435\u0440\u0438\u0430\u043B\u044B" : "\u0420\u0443\u0441\u0441\u043A\u043E\u0435" : KIND_TITLES2[kind];
     lampa().Activity.push({ url: "", component: NAME, kind, lang, title, page: 1, source: "tmdb" });
   }
   function openHistory() {
@@ -2638,9 +2791,14 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var NAME2 = "lh_home";
   var TITLE = "\u0413\u043B\u0430\u0432\u043D\u0430\u044F";
   var MARKER = "lh_home_live";
-  function wantsBadge(rowKey, cardData) {
+  function wantsBadge(rowKey, cardData, custom) {
     if (rowKey === "anime" || rowKey === "series") return true;
+    if (custom) return (custom.kind === "tv" || custom.kind === "anime") && !!cardData.original_name;
     return rowKey === "history" && !!cardData.original_name;
+  }
+  var LOADERS = { row: loadRow, custom: loadCustomRow };
+  function loadHomeRows(cfg, today, loaders = LOADERS) {
+    return Promise.all(homeRows(cfg).map((r) => r.custom ? loaders.custom(r.custom, today) : loaders.row(r.key, today)));
   }
   function bannerCard(rows) {
     const row = rows.find((r) => r.params.lh_row === "movies") || rows[0];
@@ -2732,12 +2890,15 @@ body:not(.no--animation) .lh-catalog .card--wide {
       }
     };
   }
+  function rowPages(total) {
+    return Math.max(2, total || 1);
+  }
   function buildRows(loaded) {
     return loaded.filter((row) => row.results.length).map((row) => ({
       title: row.title,
       results: row.results.map(toWideCard),
-      total_pages: row.total_pages || 1,
-      params: { items: { view: 6 }, lh_row: row.rowKey }
+      total_pages: rowPages(row.total_pages),
+      params: { items: { view: 6 }, lh_row: row.rowKey, lh_custom: row.custom || null }
     }));
   }
   function fallbackToNative(err) {
@@ -2775,7 +2936,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
           this.items[0].toggle();
         };
         const today = todayIso();
-        Promise.all(ROWS.map((key) => loadRow(key, today))).then((loaded) => {
+        loadHomeRows(store.rows.get(), today).then((loaded) => {
           if (this.destroyed) return;
           const rows = buildRows(loaded);
           if (!rows.length) {
@@ -2831,10 +2992,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
       },
       onInstance(item, data) {
         const rowKey = data.params && data.params.lh_row;
+        const custom = data.params && data.params.lh_custom || null;
         item.use({
-          onMore: () => openForRow(rowKey),
+          onMore: () => custom ? open(custom.kind, customPreset(custom)) : openForRow(rowKey),
           onInstance(card, cardData) {
-            if (wantsBadge(rowKey, cardData)) attachEpisodeBadge(card, cardData, tvStatus, todayIso);
+            if (wantsBadge(rowKey, cardData, custom)) attachEpisodeBadge(card, cardData, tvStatus, todayIso);
             card.use({
               onCreate() {
                 applyPosterClass(card.render(true), cardData);
@@ -2860,25 +3022,14 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var COMPONENT = NAME2;
   var HOME_TITLE = TITLE;
 
-  // src/downloads.js
-  var NAME3 = "lh_downloads";
-  var TITLE2 = "\u0421\u043A\u0430\u0447\u0430\u043D\u043D\u043E\u0435";
-  var HELPER_DEFAULT = "http://192.168.31.7:8091";
-  var COLS2 = 4;
-  var POLL_MS = 5e3;
-  var FILES_EVERY_MS2 = 2e3;
-  var FILES_TRIES2 = 30;
-  var PRELOAD_ABORT_MS = 3e3;
-  var HELPER_TIMEOUT_MS = 1e4;
-  var LIST_TIMEOUT_MS = 8e3;
-  var MSG2 = {
+  // src/downloads-messages.js
+  var MSG3 = {
     search: "\u0418\u0449\u0443 \u0440\u0430\u0437\u0434\u0430\u0447\u0443\u2026",
     server: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u0432 TorrServer\u2026",
     files: "\u0416\u0434\u0443 \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432\u2026",
     started: "\u0417\u0430\u043A\u0430\u0447\u043A\u0430 \u043D\u0430\u0447\u0430\u0442\u0430",
     none: "\u041F\u043E\u0434\u0445\u043E\u0434\u044F\u0449\u0435\u0439 \u0440\u0430\u0437\u0434\u0430\u0447\u0438 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B",
     noFile: "\u041D\u0443\u0436\u043D\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0435 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B",
-    parser: "\u041F\u0430\u0440\u0441\u0435\u0440 \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B",
     noServer: "TorrServer \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D",
     torrserver: "TorrServer \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
     noFiles: "TorrServer \u043D\u0435 \u043F\u043E\u043B\u0443\u0447\u0438\u043B \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432",
@@ -2895,6 +3046,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
     notStarted: "\u041D\u0435 \u043D\u0430\u0447\u0430\u0442\u0430",
     start: "\u041D\u0430\u0447\u0430\u0442\u044C \u0437\u0430\u043A\u0430\u0447\u043A\u0443"
   };
+
+  // src/downloads-entries.js
   var SNAPSHOT_FIELDS = [
     "id",
     "title",
@@ -2940,11 +3093,18 @@ body:not(.no--animation) .lh-catalog .card--wide {
   }
   function badgeLabel(progress) {
     if (!progress) return "";
-    if (progress.missing) return MSG2.missing;
-    if (progress.notStarted) return MSG2.notStarted;
+    if (progress.missing) return MSG3.missing;
+    if (progress.notStarted) return MSG3.notStarted;
     return progress.done ? "\u0421\u043A\u0430\u0447\u0430\u043D\u043E" : `\u041A\u0430\u0447\u0430\u0435\u0442\u0441\u044F ${progress.percent} %`;
   }
   var entryKey = (card) => (card.original_name || card.name ? "tv" : "movie") + ":" + card.id;
+  var episodeMeta = (o) => ({
+    kind: o.kind,
+    season: o.season,
+    episode: o.episode,
+    absolute: o.absolute,
+    ...trackerFields(o)
+  });
   function preloadData(snapshot, meta) {
     return JSON.stringify({ lampa: true, movie: snapshot, lh_preload: meta });
   }
@@ -2992,86 +3152,6 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const same2 = (entries || []).filter((e) => e && e.key === key);
     return same2.find((e) => e.hash === hash) || same2[0] || null;
   }
-  var DlError = class extends Error {
-  };
-  var fail2 = (msg) => new DlError(msg);
-  function tsBase() {
-    const L = lampa();
-    const url = L.Torserver.url();
-    if (!url) throw fail2(MSG2.noServer);
-    return url.replace(/\/+$/, "");
-  }
-  function tsHeaders() {
-    const L = lampa();
-    const headers = { "Content-Type": "application/json" };
-    if (storageField("torrserver_auth")) {
-      headers.Authorization = "Basic " + btoa(unescape(encodeURIComponent(
-        L.Storage.get("torrserver_login", "") + ":" + L.Storage.get("torrserver_password", "")
-      )));
-    }
-    return headers;
-  }
-  async function tsTorrents(body, timeoutMs) {
-    const url = tsBase() + "/torrents";
-    const ctrl = timeoutMs && typeof AbortController === "function" ? new AbortController() : null;
-    const timer = ctrl && setTimeout(() => ctrl.abort(), timeoutMs);
-    let res;
-    try {
-      res = await fetch(url, { method: "POST", headers: tsHeaders(), body: JSON.stringify(body), signal: ctrl && ctrl.signal });
-    } catch (e) {
-      throw fail2(MSG2.torrserver);
-    } finally {
-      clearTimeout(timer);
-    }
-    if (!res.ok) {
-      const err = fail2(MSG2.torrserver);
-      err.status = res.status;
-      throw err;
-    }
-    const text = await res.text();
-    return text ? JSON.parse(text) : null;
-  }
-  function firePreload(hash, index) {
-    const ctrl = typeof AbortController === "function" ? new AbortController() : null;
-    const timer = ctrl && setTimeout(() => ctrl.abort(), PRELOAD_ABORT_MS);
-    fetch(`${tsBase()}/stream?link=${hash}&index=${index}&preload`, { headers: tsHeaders(), signal: ctrl && ctrl.signal }).then((res) => res.body && res.body.cancel && res.body.cancel()).catch(() => {
-    }).finally(() => clearTimeout(timer));
-  }
-  async function waitFiles(hash, job) {
-    for (let i = 0; i < FILES_TRIES2 && !job.cancelled; i++) {
-      const json = await tsTorrents({ action: "get", hash }).catch(() => null);
-      if (json && json.file_stats && json.file_stats.length) return json.file_stats;
-      await new Promise((r) => setTimeout(r, FILES_EVERY_MS2));
-    }
-    if (job.cancelled) return null;
-    throw fail2(MSG2.noFiles);
-  }
-  function tsRem(hash) {
-    return tsTorrents({ action: "rem", hash }).catch(() => {
-    });
-  }
-  async function helperDelete(hash) {
-    const ctrl = typeof AbortController === "function" ? new AbortController() : null;
-    const timer = ctrl && setTimeout(() => ctrl.abort(), HELPER_TIMEOUT_MS);
-    try {
-      const res = await fetch(helperUrl() + "/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hash }),
-        signal: ctrl && ctrl.signal
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json || !json.ok) throw new Error(json && json.error || String(res.status));
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  var deviceName = () => String(lampa().Storage.get("lh_device", "") || "lampa");
-  function helperUrl() {
-    const v = lampa().Storage.get("lh_helper_url", HELPER_DEFAULT);
-    return String(v || HELPER_DEFAULT).trim().replace(/\/+$/, "");
-  }
-  var busy = false;
   var cacheEntry = (e) => ({
     hash: e.hash,
     index: e.index,
@@ -3092,38 +3172,177 @@ body:not(.no--animation) .lh-catalog .card--wide {
     for (const e of [...entries].sort((a, b) => (a.added || 0) - (b.added || 0))) map[e.key] = cacheEntry(e);
     return map;
   }
+
+  // src/downloads-api.js
+  var HELPER_DEFAULT = "http://192.168.31.7:8091";
+  var FILES_EVERY_MS2 = 2e3;
+  var FILES_TRIES2 = 30;
+  var PRELOAD_ABORT_MS = 3e3;
+  var HELPER_TIMEOUT_MS = 1e4;
+  var DlError = class extends Error {
+  };
+  var fail2 = (msg) => new DlError(msg);
+  function abortAfter(ms) {
+    const ctrl = ms && typeof AbortController === "function" ? new AbortController() : null;
+    const timer = ctrl && setTimeout(() => ctrl.abort(), ms);
+    return { signal: ctrl && ctrl.signal, clear: () => clearTimeout(timer) };
+  }
+  function tsBase() {
+    const url = lampa().Torserver.url();
+    if (!url) throw fail2(MSG3.noServer);
+    return url.replace(/\/+$/, "");
+  }
+  function tsHeaders() {
+    const L = lampa();
+    const headers = { "Content-Type": "application/json" };
+    if (storageField("torrserver_auth")) {
+      headers.Authorization = "Basic " + btoa(unescape(encodeURIComponent(
+        L.Storage.get("torrserver_login", "") + ":" + L.Storage.get("torrserver_password", "")
+      )));
+    }
+    return headers;
+  }
+  async function tsTorrents(body, timeoutMs) {
+    const url = tsBase() + "/torrents";
+    const abort = abortAfter(timeoutMs);
+    let res;
+    try {
+      res = await fetch(url, { method: "POST", headers: tsHeaders(), body: JSON.stringify(body), signal: abort.signal });
+    } catch (e) {
+      throw fail2(MSG3.torrserver);
+    } finally {
+      abort.clear();
+    }
+    if (!res.ok) {
+      const err = fail2(MSG3.torrserver);
+      err.status = res.status;
+      throw err;
+    }
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  }
+  var serverFields = (t) => ({ title: t.title || "", poster: t.poster || "", category: t.category || "" });
+  function markPreload(hash, fields, snapshot, meta) {
+    return tsTorrents({ action: "set", hash, ...fields, data: preloadData(snapshot, meta) }).catch(() => {
+    });
+  }
+  function firePreload(hash, index) {
+    const abort = abortAfter(PRELOAD_ABORT_MS);
+    fetch(`${tsBase()}/stream?link=${hash}&index=${index}&preload`, { headers: tsHeaders(), signal: abort.signal }).then((res) => res.body && res.body.cancel && res.body.cancel()).catch(() => {
+    }).finally(abort.clear);
+  }
+  async function waitFiles(hash, job) {
+    for (let i = 0; i < FILES_TRIES2 && !job.cancelled; i++) {
+      const json = await tsTorrents({ action: "get", hash }).catch(() => null);
+      if (json && json.file_stats && json.file_stats.length) return json.file_stats;
+      await new Promise((r) => setTimeout(r, FILES_EVERY_MS2));
+    }
+    if (job.cancelled) return null;
+    throw fail2(MSG3.noFiles);
+  }
+  function tsRem(hash) {
+    return tsTorrents({ action: "rem", hash }).catch(() => {
+    });
+  }
+  function helperUrl() {
+    const v = lampa().Storage.get("lh_helper_url", HELPER_DEFAULT);
+    return String(v || HELPER_DEFAULT).trim().replace(/\/+$/, "");
+  }
+  async function helperDelete(hash) {
+    const abort = abortAfter(HELPER_TIMEOUT_MS);
+    try {
+      const res = await fetch(helperUrl() + "/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hash }),
+        signal: abort.signal
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json || !json.ok) throw new Error(json && json.error || String(res.status));
+    } finally {
+      abort.clear();
+    }
+  }
+  var deviceName = () => String(lampa().Storage.get("lh_device", "") || "lampa");
+
+  // src/downloads-list.js
+  var LIST_TIMEOUT_MS = 8e3;
   function syncCache(entries) {
     const map = cacheUpdate(entries, store.preload.all().length);
     if (map) store.preload.replace(map);
   }
+  function cachedDownloads() {
+    return store.preload.all().filter((e) => e.card && e.hash).map(({ cardId, ...e }) => ({ ...e, key: cardId }));
+  }
   async function listDownloads() {
     const list = await tsTorrents({ action: "list" }, LIST_TIMEOUT_MS);
-    if (!Array.isArray(list)) throw fail2(MSG2.torrserver);
+    if (!Array.isArray(list)) throw fail2(MSG3.torrserver);
     const entries = parseDownloadEntries(list);
     const legacy = legacyEntries(list, cachedDownloads());
     for (const e of legacy) {
       const { server, ...entry } = e;
-      const meta = {
-        index: entry.index,
-        kind: entry.kind,
-        season: entry.season,
-        episode: entry.episode,
-        absolute: entry.absolute,
-        ...trackerFields(entry),
-        added: entry.added || Date.now(),
-        by: deviceName()
-      };
-      const fields = { title: server.title || "", poster: server.poster || "", category: server.category || "" };
-      tsTorrents({ action: "set", hash: entry.hash, ...fields, data: preloadData(entry.card, meta) }).catch(() => {
-      });
+      const meta = { index: entry.index, ...episodeMeta(entry), added: entry.added || Date.now(), by: deviceName() };
+      markPreload(entry.hash, serverFields(server), entry.card, meta);
       entries.push({ ...entry, size: server.torrent_size });
     }
     entries.sort((a, b) => (b.added || 0) - (a.added || 0));
     syncCache(entries);
     return entries;
   }
-  function cachedDownloads() {
-    return store.preload.all().filter((e) => e.card && e.hash).map(({ cardId, ...e }) => ({ ...e, key: cardId }));
+  var STATUS_TIMEOUT_MS = 8e3;
+  async function status(hash, index) {
+    let json;
+    try {
+      json = await tsTorrents({ action: "get", hash }, STATUS_TIMEOUT_MS);
+    } catch (err) {
+      if (err && err.status === 404) return { loaded: 0, size: 0, percent: 0, done: false, missing: true };
+      throw err;
+    }
+    const stats = json && json.file_stats || [];
+    const p = preloadState({ index, loaded_size: json && json.loaded_size, file_stats: stats });
+    const file = stats.find((f) => f.id === p.id);
+    return { loaded: json && json.loaded_size || 0, size: file && file.length || 0, ...p };
+  }
+  async function remove(entry) {
+    const L = lampa();
+    if (!entry || !entry.hash) return true;
+    L.Loading.start(() => L.Loading.stop(), MSG3.removing);
+    try {
+      await helperDelete(entry.hash);
+    } catch (e) {
+      L.Loading.stop();
+      L.Noty.show(MSG3.helper);
+      return false;
+    }
+    L.Loading.stop();
+    store.preload.remove(entry.key);
+    L.Noty.show(MSG3.removed);
+    return true;
+  }
+  async function forget(entry) {
+    if (!entry) return;
+    try {
+      if (entry.hash) await tsTorrents({ action: "rem", hash: entry.hash });
+    } catch (e) {
+    }
+    store.preload.remove(entry.key);
+    lampa().Noty.show(MSG3.forgotten);
+  }
+
+  // src/downloads-preload.js
+  var busy = false;
+  function showError2(err) {
+    if (!(err instanceof DlError)) console.error("lampa-home preload", err);
+    lampa().Noty.show(err instanceof DlError ? err.message : MSG3.torrserver);
+  }
+  var fileFor = (files, ctx, releaseTitle, movie) => pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(releaseTitle) }, fileInfos(files, movie));
+  function makeCancel(job, dropAdded, finish) {
+    return () => {
+      if (job.committed) return;
+      job.cancelled = true;
+      dropAdded();
+      finish();
+    };
   }
   async function preload(card) {
     const L = lampa();
@@ -3143,12 +3362,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
       if (loading) L.Loading.stop();
       loading = false;
     };
-    const cancel = () => {
-      job.cancelled = true;
-      dropAdded();
-      finish();
-    };
-    L.Loading.start(cancel, MSG2.search);
+    const cancel = makeCancel(job, dropAdded, finish);
+    L.Loading.start(cancel, MSG3.search);
     try {
       tsBase();
       const target = await resolveTarget(card);
@@ -3163,32 +3378,24 @@ body:not(.no--animation) .lh-catalog .card--wide {
         if (!picked || picked === "list") {
           job.cancelled = true;
           finish();
-          if (picked === "list") openNativeList(buildSearchParams(movie, ctx, storageField("parse_lang")));
+          if (picked === "list") openNativeList(listParams(movie, ctx));
           return;
         }
         ctx = picked;
         loading = true;
-        L.Loading.start(cancel, MSG2.search);
+        L.Loading.start(cancel, MSG3.search);
       }
       const found = await findReleases(movie, ctx, job);
       if (job.cancelled) return;
       ctx = inferTracker(ctx, found.results, found.names);
       const { chosen } = selectTorrent(found.results, { ...ctx, names: found.names });
-      if (!chosen) throw fail2(MSG2.none);
-      L.Loading.setText(MSG2.server);
+      if (!chosen) throw fail2(MSG3.none);
+      L.Loading.setText(MSG3.server);
       before = await listDownloads().catch(() => cachedDownloads());
       if (job.cancelled) return;
       const snapshot = cardSnapshot(movie);
       const title = String(chosen.Title).replace("??", "?");
-      const meta = {
-        kind: ctx.kind,
-        season: ctx.season,
-        episode: ctx.episode,
-        absolute: ctx.absolute,
-        ...trackerFields(ctx),
-        added: Date.now(),
-        by: deviceName()
-      };
+      const meta = { ...episodeMeta(ctx), added: Date.now(), by: deviceName() };
       const fields = {
         title: "[LAMPA] " + title,
         poster: movie.poster_path ? L.Api.img(movie.poster_path) : "",
@@ -3202,23 +3409,24 @@ body:not(.no--animation) .lh-catalog .card--wide {
         save_to_db: true
       });
       const hash = added && added.hash;
-      if (!hash) throw fail2(MSG2.torrserver);
+      if (!hash) throw fail2(MSG3.torrserver);
       job.hash = hash;
       if (job.cancelled) return dropAdded();
-      L.Loading.setText(MSG2.files);
+      L.Loading.setText(MSG3.files);
       const files = await waitFiles(hash, job);
       if (job.cancelled || !files) return;
-      const file = pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(chosen.Title) }, fileInfos(files, movie));
-      if (!file) throw fail2(MSG2.noFile);
+      const file = fileFor(files, ctx, chosen.Title, movie);
+      if (!file) throw fail2(MSG3.noFile);
       const key = entryKey(movie);
       const existing = findExisting(before, key, hash);
       let replaced = false;
       if (replacePlan(existing, hash) === "replace") {
-        L.Loading.setText(MSG2.removing);
+        L.Loading.setText(MSG3.removing);
+        job.committed = true;
         try {
           await helperDelete(existing.hash);
         } catch (e) {
-          throw fail2(MSG2.replaceFailed);
+          throw fail2(MSG3.replaceFailed);
         }
         store.preload.remove(key);
         replaced = true;
@@ -3227,83 +3435,46 @@ body:not(.no--animation) .lh-catalog .card--wide {
       job.kicked = true;
       firePreload(hash, file.id);
       meta.index = file.id;
-      await tsTorrents({ action: "set", hash, ...fields, data: preloadData(snapshot, meta) }).catch(() => {
-      });
+      await markPreload(hash, fields, snapshot, meta);
       store.preload.set(key, cacheEntry({ ...meta, hash, title: chosen.Title, size: file.length, card: snapshot }));
       finish();
-      L.Noty.show(replaced ? `${MSG2.replaced}. ${MSG2.started}` : MSG2.started);
+      L.Noty.show(replaced ? `${MSG3.replaced}. ${MSG3.started}` : MSG3.started);
     } catch (err) {
       if (job.cancelled) return;
       dropAdded();
       finish();
-      if (!(err instanceof DlError)) console.error("lampa-home preload", err);
-      L.Noty.show(err instanceof DlError ? err.message : MSG2.torrserver);
+      showError2(err);
     }
-  }
-  async function status(hash, index) {
-    let json;
-    try {
-      json = await tsTorrents({ action: "get", hash });
-    } catch (err) {
-      if (err && err.status === 404) return { loaded: 0, size: 0, percent: 0, done: false, missing: true };
-      throw err;
-    }
-    const stats = json && json.file_stats || [];
-    const p = preloadState({ index, loaded_size: json && json.loaded_size, file_stats: stats });
-    const file = stats.find((f) => f.id === p.id);
-    return { loaded: json && json.loaded_size || 0, size: file && file.length || 0, ...p };
   }
   async function startPreload(entry) {
     const L = lampa();
-    L.Loading.start(() => L.Loading.stop(), MSG2.files);
+    L.Loading.start(() => L.Loading.stop(), MSG3.files);
     try {
       const json = await tsTorrents({ action: "get", hash: entry.hash });
       const files = json && json.file_stats || [];
-      if (!files.length) throw fail2(MSG2.noFiles);
-      const ctx = { kind: entry.kind, season: entry.season, episode: entry.episode, absolute: entry.absolute, ...trackerFields(entry) };
-      const file = pickFile(files, { ...ctx, titleHasSeason: titleHasSeason(entry.title || "") }, fileInfos(files, entry.card));
-      if (!file) throw fail2(MSG2.noFile);
+      if (!files.length) throw fail2(MSG3.noFiles);
+      const ctx = episodeMeta(entry);
+      const file = fileFor(files, ctx, entry.title || "", entry.card);
+      if (!file) throw fail2(MSG3.noFile);
       firePreload(entry.hash, file.id);
       const meta = { ...ctx, index: file.id, added: entry.added || Date.now(), by: deviceName() };
-      const fields = { title: json.title || "", poster: json.poster || "", category: json.category || "" };
-      await tsTorrents({ action: "set", hash: entry.hash, ...fields, data: preloadData(entry.card, meta) }).catch(() => {
-      });
+      await markPreload(entry.hash, serverFields(json), entry.card, meta);
       store.preload.set(entry.key, cacheEntry({ ...entry, ...meta, size: file.length }));
       L.Loading.stop();
-      L.Noty.show(MSG2.started);
+      L.Noty.show(MSG3.started);
       return true;
     } catch (err) {
       L.Loading.stop();
-      if (!(err instanceof DlError)) console.error("lampa-home preload", err);
-      L.Noty.show(err instanceof DlError ? err.message : MSG2.torrserver);
+      showError2(err);
       return false;
     }
   }
-  async function remove(entry) {
-    const L = lampa();
-    if (!entry || !entry.hash) return true;
-    L.Loading.start(() => L.Loading.stop(), MSG2.removing);
-    try {
-      await helperDelete(entry.hash);
-    } catch (e) {
-      L.Loading.stop();
-      L.Noty.show(MSG2.helper);
-      return false;
-    }
-    L.Loading.stop();
-    store.preload.remove(entry.key);
-    L.Noty.show(MSG2.removed);
-    return true;
-  }
-  async function forget(entry) {
-    if (!entry) return;
-    try {
-      if (entry.hash) await tsTorrents({ action: "rem", hash: entry.hash });
-    } catch (e) {
-    }
-    store.preload.remove(entry.key);
-    lampa().Noty.show(MSG2.forgotten);
-  }
+
+  // src/downloads-screen.js
+  var NAME3 = "lh_downloads";
+  var TITLE2 = "\u0421\u043A\u0430\u0447\u0430\u043D\u043D\u043E\u0435";
+  var COLS2 = 4;
+  var POLL_MS = 5e3;
   var pollQueue = createQueue(2);
   function component3(object) {
     const L = lampa();
@@ -3350,32 +3521,30 @@ body:not(.no--animation) .lh-catalog .card--wide {
         onBack: () => L.Controller.toggle(enabled)
       });
     }
+    const forgetAndReload = (entry) => forget(entry).then(reload);
+    const removeAndReload = (entry) => remove(entry).then((ok) => ok ? reload() : offerForget(entry));
     function offerForget(entry) {
-      ask(MSG2.helper, [{ title: MSG2.forget, forget: true }], (a) => {
-        if (a.forget) forget(entry).then(reload);
+      ask(MSG3.helper, [{ title: MSG3.forget, forget: true }], (a) => {
+        if (a.forget) forgetAndReload(entry);
       });
     }
     function offerStart(entry) {
-      ask(MSG2.notStarted, [{ title: MSG2.start, start: true }, { title: MSG2.forget, forget: true }], (a) => {
+      ask(MSG3.notStarted, [{ title: MSG3.start, start: true }, { title: MSG3.forget, forget: true }], (a) => {
         if (a.start) startPreload(entry).then((ok) => ok && reload());
-        else if (a.forget) forget(entry).then(reload);
+        else if (a.forget) forgetAndReload(entry);
       });
     }
     function confirmRemove(entry) {
       const state = badges.get(entry.hash);
       if (state && state.missing) {
-        ask(MSG2.missing, [{ title: MSG2.forget, forget: true }, { title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441 \u0434\u0438\u0441\u043A\u0430", remove: true }], (a) => {
-          if (a.forget) {
-            forget(entry).then(reload);
-          } else if (a.remove) {
-            remove(entry).then((ok) => ok ? reload() : offerForget(entry));
-          }
+        ask(MSG3.missing, [{ title: MSG3.forget, forget: true }, { title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441 \u0434\u0438\u0441\u043A\u0430", remove: true }], (a) => {
+          if (a.forget) forgetAndReload(entry);
+          else if (a.remove) removeAndReload(entry);
         });
         return;
       }
-      ask(MSG2.confirm, [{ title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C", remove: true }], (a) => {
-        if (!a.remove) return;
-        remove(entry).then((ok) => ok ? reload() : offerForget(entry));
+      ask(MSG3.confirm, [{ title: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C", remove: true }], (a) => {
+        if (a.remove) removeAndReload(entry);
       });
     }
     comp.use({
@@ -3394,7 +3563,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
         });
         listDownloads().catch((err) => {
           if (!(err instanceof DlError)) console.error("lampa-home downloads", err);
-          L.Noty.show(MSG2.offline);
+          L.Noty.show(MSG3.offline);
           return cachedDownloads();
         }).then(show);
       },
@@ -3419,8 +3588,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
             const state = badges.get(entry.hash);
             if (state && state.missing) return confirmRemove(entry);
             if (state && state.notStarted) return offerStart(entry);
-            const { card, hash, index, kind, season, episode, absolute, title } = entry;
-            startFromHash(hash, card, { kind, season, episode, absolute, index, ...trackerFields(entry) }, title);
+            startFromHash(entry.hash, entry.card, { ...episodeMeta(entry), index: entry.index }, entry.title);
           }),
           onFocus() {
             L.Background.change(L.Utils.cardImgBackground(data));
@@ -3441,6 +3609,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
   function open3() {
     lampa().Activity.push({ url: "", component: NAME3, title: TITLE2, page: 1 });
   }
+
+  // src/downloads.js
   function init2() {
     const L = lampa();
     L.Listener.follow("full", (e) => {
@@ -3454,17 +3624,25 @@ body:not(.no--animation) .lh-catalog .card--wide {
   // src/menu.js
   var CATALOG_ACTIONS = ["movie", "tv", "cartoon", "anime"];
   var DOWNLOADS_ACTION = "lh_downloads";
-  var KEEP_ACTIONS = ["main", "movie", "tv", "cartoon", "anime", "settings", DOWNLOADS_ACTION];
+  var SWITCH_ACTION = "lh_switch";
+  var KEEP_ACTIONS = ["main", "movie", "tv", "cartoon", "anime", "history", "settings", DOWNLOADS_ACTION, SWITCH_ACTION];
+  var CLASSIC_KEY = "lh_classic";
+  var SWITCH_ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 7h13l-3-3M20 17H7l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   var DOWNLOADS_ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   var HIDE_CLASS = "lh-hide";
-  function shouldHide(action) {
-    return !KEEP_ACTIONS.includes(action);
+  var isClassic = () => storage.get(CLASSIC_KEY, false) === true;
+  function shouldHide(action, classic = false) {
+    return !classic && !KEEP_ACTIONS.includes(action);
+  }
+  function switchTitle(classic) {
+    return classic ? "Lampa Home" : "\u041A\u043B\u0430\u0441\u0441\u0438\u0447\u0435\u0441\u043A\u0430\u044F Lampa";
   }
   function hideItems(root) {
     if (!root || typeof root.find !== "function") return;
+    const classic = isClassic();
     root.find(".menu__item").each(function() {
       const el = window.$(this);
-      if (shouldHide(el.attr("data-action"))) el.addClass(HIDE_CLASS);
+      el.toggleClass(HIDE_CLASS, shouldHide(el.attr("data-action"), classic));
     });
   }
   function needsSwap(active) {
@@ -3477,6 +3655,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     return false;
   }
   function swapStart() {
+    if (isClassic()) return false;
     const L = lampa();
     const active = L.Activity.active();
     if (!needsSwap(active)) return false;
@@ -3492,11 +3671,29 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const item = L.Menu.addButton(DOWNLOADS_ICON, TITLE2, () => open3());
     if (item && item.attr) item.attr("data-action", DOWNLOADS_ACTION);
   }
+  function toggleClassic(item) {
+    const L = lampa();
+    const classic = !isClassic();
+    storage.set(CLASSIC_KEY, classic);
+    if (item && item.find) item.find(".menu__text").text(switchTitle(classic));
+    hideItems(window.$(".menu"));
+    if (classic) L.Activity.replace({ component: "main", source: L.Storage.field("source"), title: L.Lang.translate("title_main") });
+    else L.Activity.replace({ component: COMPONENT, title: HOME_TITLE, source: "tmdb" });
+  }
+  function addSwitchItem() {
+    const L = lampa();
+    if (!L.Menu || typeof L.Menu.addButton !== "function") return;
+    if (window.$('.menu .menu__item[data-action="' + SWITCH_ACTION + '"]').length) return;
+    let item = null;
+    item = L.Menu.addButton(SWITCH_ICON, switchTitle(isClassic()), () => toggleClassic(item));
+    if (item && item.attr) item.attr("data-action", SWITCH_ACTION);
+  }
   function init3() {
     const L = lampa();
     addDownloadsItem();
+    addSwitchItem();
     L.Listener.follow("menu", (e) => {
-      if (e.type !== "action") return;
+      if (e.type !== "action" || isClassic()) return;
       if (e.action === "main") {
         e.abort();
         open2();
@@ -3606,6 +3803,85 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }
   }
 
+  // src/rows-editor.js
+  var TITLE3 = "\u041B\u0435\u043D\u0442\u044B \u0433\u043B\u0430\u0432\u043D\u043E\u0439";
+  var LATER = "\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043F\u0440\u0438 \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0435\u043C \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u0438 \u0433\u043B\u0430\u0432\u043D\u043E\u0439";
+  var SETTINGS_CONTROLLER = "settings_component";
+  function open4() {
+    const L = lampa();
+    let told = false;
+    const save = (cfg) => {
+      store.rows.set(cfg);
+      if (!told) noty(LATER);
+      told = true;
+    };
+    function showMain(focusId) {
+      const items = editorItems(store.rows.get()).map((it) => focusId && it.lh && it.lh.id === focusId ? { ...it, selected: true } : it);
+      L.Select.show({
+        title: TITLE3,
+        items,
+        onCheck: (a) => {
+          if (a.lh && a.lh.type === "builtin") save(toggleRow(store.rows.get(), a.lh.key));
+        },
+        onSelect: (a) => {
+          if (!a.lh) return showMain();
+          if (a.lh.type === "custom") showCustom(a.lh.id);
+          else if (a.lh.type === "add") showKinds();
+          else showMain();
+        },
+        onBack: () => L.Controller.toggle(SETTINGS_CONTROLLER)
+      });
+    }
+    function showCustom(id) {
+      const cfg = store.rows.get();
+      const row = cfg.custom.find((r) => r.id === id);
+      if (!row) return showMain();
+      L.Select.show({
+        title: customRowTitle(row),
+        items: customActions(cfg, id),
+        onSelect: (a) => {
+          const now = store.rows.get();
+          if (a.action === "up") save(moveCustomRow(now, id, -1));
+          else if (a.action === "down") save(moveCustomRow(now, id, 1));
+          else if (a.action === "remove") {
+            save(removeCustomRow(now, id));
+            return showMain();
+          }
+          showMain(id);
+        },
+        onBack: () => showMain(id)
+      });
+    }
+    function showKinds() {
+      L.Select.show({
+        title: "\u041D\u043E\u0432\u0430\u044F \u043B\u0435\u043D\u0442\u0430",
+        items: kindItems(),
+        onSelect: (a) => showGenres(a.kind),
+        onBack: () => showMain()
+      });
+    }
+    function showGenres(kind) {
+      L.Select.show({
+        title: "\u0416\u0430\u043D\u0440",
+        items: genreItems(store.rows.get(), kind),
+        onSelect: (a) => {
+          const cfg = store.rows.get();
+          if (hasCustomRow(cfg, kind, a.genre)) {
+            noty("\u0422\u0430\u043A\u0430\u044F \u043B\u0435\u043D\u0442\u0430 \u0443\u0436\u0435 \u0435\u0441\u0442\u044C");
+            return showGenres(kind);
+          }
+          const id = newRowId();
+          told = true;
+          store.rows.set(addCustomRow(cfg, kind, a.genre, id));
+          noty(`\u041B\u0435\u043D\u0442\u0430 \xAB${customRowTitle({ kind, genre: a.genre })}\xBB \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u0430: \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u043F\u0440\u0438 \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0435\u043C \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u0438 \u0433\u043B\u0430\u0432\u043D\u043E\u0439`);
+          showMain(id);
+        },
+        onBack: showKinds
+      });
+    }
+    showMain();
+  }
+
   // src/settings.js
   var COMPONENT2 = "lh_settings";
   var ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
@@ -3618,6 +3894,12 @@ body:not(.no--animation) .lh-catalog .card--wide {
   function register5() {
     const api = lampa().SettingsApi;
     api.addComponent({ component: COMPONENT2, name: "Lampa Home", icon: ICON });
+    api.addParam({
+      component: COMPONENT2,
+      param: { name: "lh_rows_edit", type: "button" },
+      field: { name: "\u041B\u0435\u043D\u0442\u044B \u0433\u043B\u0430\u0432\u043D\u043E\u0439", description: "\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0438\u043B\u0438 \u0441\u043A\u0440\u044B\u0442\u044C \u043B\u0435\u043D\u0442\u044B, \u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043B\u0435\u043D\u0442\u0443 \u043F\u043E \u0436\u0430\u043D\u0440\u0443. \u041F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u0442\u0441\u044F \u043F\u0440\u0438 \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0435\u043C \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u0438 \u0433\u043B\u0430\u0432\u043D\u043E\u0439" },
+      onChange: open4
+    });
     api.addParam({
       component: COMPONENT2,
       param: { name: "lh_banner", type: "trigger", default: true },
