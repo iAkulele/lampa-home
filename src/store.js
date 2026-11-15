@@ -1,4 +1,5 @@
 import { STORAGE_KEYS, LIMITS } from './config.js';
+import { normalizeRowsConfig } from './rows.js';
 
 const MAX_ENTRIES = 200;
 const DEFAULT_FILTER = { genre: null, year: null, sort: 'new' };
@@ -132,5 +133,15 @@ export function createStore(storage, now = () => Date.now()) {
     trim(STORAGE_KEYS.seasonmap, 'checked');
   }
 
-  return { progress, seen, tvcache, seasonmap, notify, filters, preload, prune };
+  // Home rows: built-ins switched off and the user's genre rows (see rows.js).
+  const rows = {
+    get() {
+      return normalizeRowsConfig(storage.get(STORAGE_KEYS.rows, null));
+    },
+    set(cfg) {
+      storage.set(STORAGE_KEYS.rows, normalizeRowsConfig(cfg));
+    },
+  };
+
+  return { progress, seen, tvcache, seasonmap, notify, filters, preload, rows, prune };
 }

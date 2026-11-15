@@ -10,6 +10,7 @@ export const STORAGE_KEYS = {
   filters: 'lh_filters',
   preload: 'lh_preload',
   settings: 'lh_settings',
+  rows: 'lh_rows',
 };
 
 // Movies only: a 2160p release below its floor is scored as 1080p, a 1080p (or a
