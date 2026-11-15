@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { buildRows } from '../src/home.js';
+import { buildRows, wantsBadge, loadHomeRows } from '../src/home.js';
 
 const cards = (n) => Array.from({ length: n }, (_, i) => ({ id: i + 1, title: 'Фильм ' + i }));
 
@@ -28,6 +28,41 @@ test('test_full_history_row_gets_more', () => {
 test('test_short_history_row_has_no_more', () => {
   const [row] = buildRows([{ title: 'Недавно просмотренное', rowKey: 'history', results: cards(4) }]);
   assert.strictEqual(row.total_pages, 1);
+});
+
+test('test_custom_row_params_carry_its_catalog', () => {
+  const custom = { id: 'a1', kind: 'tv', genre: 18 };
+  const [row] = buildRows([{ title: 'Драма · сериалы', rowKey: 'custom:a1', custom, results: cards(3), total_pages: 1 }]);
+  assert.strictEqual(row.params.lh_row, 'custom:a1');
+  assert.deepStrictEqual(row.params.lh_custom, custom);
+});
+
+test('test_custom_tv_and_anime_rows_get_badges', () => {
+  const tvCard = { id: 1, original_name: 'Show' };
+  assert.strictEqual(wantsBadge('custom:a', tvCard, { kind: 'tv' }), true);
+  assert.strictEqual(wantsBadge('custom:a', tvCard, { kind: 'anime' }), true);
+  assert.strictEqual(wantsBadge('custom:a', { id: 2, original_title: 'Film' }, { kind: 'movie' }), false);
+  assert.strictEqual(wantsBadge('movies', { id: 2 }), false);
+  assert.strictEqual(wantsBadge('series', { id: 2 }), true);
+});
+
+test('test_home_loads_enabled_builtins_then_custom_rows', async () => {
+  const cfg = {
+    disabled: ['horror', 'anime', 'series', 'cartoons', 'russian_tv', 'history'],
+    custom: [{ id: 'z', kind: 'movie', genre: 35 }],
+  };
+  const seen = [];
+  const loaders = {
+    row: (key, today) => { seen.push(['row', key, today]); return Promise.resolve(key); },
+    custom: (c, today) => { seen.push(['custom', c.id, today]); return Promise.resolve(c.id); },
+  };
+  const loaded = await loadHomeRows(cfg, '2026-11-15', loaders);
+  assert.deepStrictEqual(loaded, ['movies', 'russian', 'z']);
+  assert.deepStrictEqual(seen, [
+    ['row', 'movies', '2026-11-15'],
+    ['row', 'russian', '2026-11-15'],
+    ['custom', 'z', '2026-11-15'],
+  ]);
 });
 
 test('test_empty_rows_are_dropped', () => {

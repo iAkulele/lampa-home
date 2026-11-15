@@ -3,6 +3,7 @@ import { tmdbGet, favoriteGet, store } from './lampa.js';
 import { episodeStatus } from './episodes.js';
 import { createQueue } from './queue.js';
 import { rowQuery } from './tmdb-queries.js';
+import { customRowKey, customRowQuery, customRowKeeps, customRowTitle } from './rows.js';
 import { rowTitle, hasRussianTitle, fillPages, isAnimeCard, rowHidesAnime } from './cards.js';
 
 export const HISTORY_LIMIT = 20;
@@ -33,12 +34,27 @@ export function loadRow(rowKey, today = todayIso()) {
   }
   const q = rowQuery(rowKey, today);
   if (!q) return Promise.resolve(base);
+  const keep = (c) => hasRussianTitle(c) && !(rowHidesAnime(rowKey) && isAnimeCard(c));
+  return fillRow(base, () => q, keep);
+}
+
+// A user's genre row (rows.js): the catalog's query and card filter.
+// Never rejects, like loadRow.
+export function loadCustomRow(custom, today = todayIso()) {
+  const base = { title: customRowTitle(custom), rowKey: customRowKey(custom.id), custom, results: [] };
+  return fillRow(base, (page) => customRowQuery(custom, page, today), customRowKeeps(custom.kind));
+}
+
+// queryFor(page) -> {url, params}; keep(card) filters each page.
+function fillRow(base, queryFor, keep) {
   let totalPages = 1;
-  const fetchPage = (page) => get(q.url, { ...q.params, page }).then((json) => {
-    if (page === 1) totalPages = (json && json.total_pages) || 1;
-    const keep = (c) => hasRussianTitle(c) && !(rowHidesAnime(rowKey) && isAnimeCard(c));
-    return { cards: ((json && json.results) || []).filter(keep), done: page >= totalPages };
-  });
+  const fetchPage = (page) => {
+    const q = queryFor(page);
+    return get(q.url, { ...q.params, page }).then((json) => {
+      if (page === 1) totalPages = (json && json.total_pages) || 1;
+      return { cards: ((json && json.results) || []).filter(keep), done: page >= totalPages };
+    });
+  };
   return fillPages(fetchPage).then(
     (results) => ({ ...base, results, total_pages: totalPages }),
     () => base,
