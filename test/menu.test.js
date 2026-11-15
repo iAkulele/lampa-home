@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { needsSwap, shouldHide } from '../src/menu.js';
+import { needsSwap, shouldHide, switchTitle } from '../src/menu.js';
 import { MARKER } from '../src/home.js';
 
 test('test_native_main_is_swapped', () => {
@@ -22,10 +22,19 @@ test('test_other_activities_and_none_are_left_alone', () => {
 });
 
 test('test_should_hide_keeps_allowed_actions', () => {
-  for (const a of ['main', 'movie', 'tv', 'cartoon', 'anime', 'settings', 'lh_downloads']) {
+  for (const a of ['main', 'movie', 'tv', 'cartoon', 'anime', 'history', 'settings', 'lh_downloads', 'lh_switch']) {
     assert.strictEqual(shouldHide(a), false, a);
   }
-  for (const a of ['feed', 'myperson', 'catalog', 'filter', 'relise', 'favorite', 'history', 'subscribes', 'timetable', 'mytorrents', 'about', 'console', 'edit']) {
+  for (const a of ['feed', 'myperson', 'catalog', 'filter', 'relise', 'favorite', 'subscribes', 'timetable', 'mytorrents', 'about', 'console', 'edit']) {
     assert.strictEqual(shouldHide(a), true, a);
   }
+});
+
+test('test_classic_mode_hides_nothing', () => {
+  for (const a of ['feed', 'catalog', 'favorite', 'mytorrents', undefined]) assert.strictEqual(shouldHide(a, true), false, a);
+});
+
+test('test_switch_item_names_the_other_interface', () => {
+  assert.strictEqual(switchTitle(false), 'Классическая Lampa');
+  assert.strictEqual(switchTitle(true), 'Lampa Home');
 });
