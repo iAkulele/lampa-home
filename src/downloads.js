@@ -7,19 +7,19 @@
 // every device shows the same downloads; Lampa.Storage keeps only a local copy for
 // when TorrServer is unreachable.
 //
-// This file wires the «...» menu entry and re-exports the public API of the
-// downloads-*.js modules for index.js, menu.js and settings.js.
+// This file wires the «...» menu entry; the work lives in:
+//   downloads-preload.js   «Скачать заранее» and «Начать закачку»
+//   downloads-screen.js    the «Скачанное» component
+//   downloads-list.js      server list + local copy, status, remove, forget
+//   downloads-api.js       TorrServer /torrents and /stream, the PC delete helper
+//   downloads-entries.js   entries, progress, cache shape (pure)
+//   downloads-messages.js  texts
 import { lampa } from './lampa.js';
 import { preload } from './downloads-preload.js';
 
-export { TITLE, NAME as COMPONENT, register, open } from './downloads-screen.js';
-export { HELPER_DEFAULT, helperUrl } from './downloads-api.js';
-export { preload, startPreload } from './downloads-preload.js';
-export { listDownloads, status, remove, forget } from './downloads-list.js';
-export {
-  preloadProgress, preloadState, cardSnapshot, replacePlan, badgeLabel, entryKey, preloadData, parseDownloadEntries,
-  legacyEntries, findExisting, cacheUpdate,
-} from './downloads-entries.js';
+// For index.js, menu.js and settings.js.
+export { TITLE, register, open } from './downloads-screen.js';
+export { HELPER_DEFAULT } from './downloads-api.js';
 
 // «Скачать заранее» in the card's «...» options.
 export function init() {

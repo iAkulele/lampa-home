@@ -11,7 +11,7 @@ import { DlError } from './downloads-api.js';
 import { listDownloads, cachedDownloads, status, remove, forget } from './downloads-list.js';
 import { startPreload } from './downloads-preload.js';
 
-export const NAME = 'lh_downloads';
+const NAME = 'lh_downloads';
 export const TITLE = 'Скачанное';
 const COLS = 4;
 const POLL_MS = 5000;

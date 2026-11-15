@@ -33,7 +33,7 @@ export function openNativeList(params) {
   L.Activity.push({ url: '', title: L.Lang.translate('title_torrents'), component: 'torrents', ...params });
 }
 
-export function searchTorrents(params) {
+function searchTorrents(params) {
   const L = lampa();
   const req = new Promise((resolve, reject) => {
     L.Parser.get(params, (data) => resolve((data && data.Results) || []), () => reject(fail(MSG_PARSER)));

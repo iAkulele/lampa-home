@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { preloadProgress, cardSnapshot, badgeLabel, replacePlan, parseDownloadEntries, findExisting, legacyEntries, preloadState, cacheUpdate } from '../src/downloads.js';
+import { preloadProgress, cardSnapshot, badgeLabel, replacePlan, parseDownloadEntries, findExisting, legacyEntries, preloadState, cacheUpdate } from '../src/downloads-entries.js';
 
 const MiB = 1024 ** 2;
 const files = [

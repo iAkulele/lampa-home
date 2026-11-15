@@ -95,7 +95,7 @@ export function tsRem(hash) {
   return tsTorrents({ action: 'rem', hash }).catch(() => {});
 }
 
-export function helperUrl() {
+function helperUrl() {
   const v = lampa().Storage.get('lh_helper_url', HELPER_DEFAULT);
   return String(v || HELPER_DEFAULT).trim().replace(/\/+$/, '');
 }

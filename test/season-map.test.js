@@ -5,8 +5,9 @@ import { trackerPosition, absoluteOf } from '../src/episodes.js';
 import { selectTorrent, inferSeasonMap } from '../src/torrent-select.js';
 import { pickerItems, mappedEpisodes, mappedSeasonItems, mappedTarget, watchedEpisodes } from '../src/episode-picker.js';
 import {
-  pickFile, withTracker, inferTracker, previousEpisodeCtx, absoluteInPack, packNumbering, trackerFields, buildSearchParams,
-} from '../src/play.js';
+  pickFile, withTracker, inferTracker, previousEpisodeCtx, absoluteInPack, packNumbering, trackerFields,
+} from '../src/play-pick.js';
+import { buildSearchParams } from '../src/play-search.js';
 import { TOKYO_GROUP } from './fixtures/tmdb-episode-group.js';
 
 const GiB = 1024 ** 3;

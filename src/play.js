@@ -1,22 +1,21 @@
 // «Играть» on the card screen: the button, the «...» menu entry and the inner
-// player hook. The work itself lives in the play-*.js modules; this file also
-// re-exports their public API for home.js, index.js, notify.js and downloads.js.
+// player hook. The work itself lives in the play-*.js modules:
+//   play-run.js         run() / startFromHash(): the whole «Играть» flow
+//   play-target.js      which episode to play, the episode picker
+//   play-search.js      parser queries, result cache, Lampa's native list
+//   play-candidates.js  which releases to try and the try loop
+//   play-torrserver.js  TorrServer via Lampa: add, file list, playlist
+//   play-pick.js        kind, tracker seasons, file choice (pure)
+//   play-progress.js    timeline marks, lh_progress from the inner player
+//   play-job.js         the single running job and its loader
+//   play-error.js       PlayError, timeouts
 import { lampa } from './lampa.js';
 import { run, chooseManually } from './play-run.js';
 import { onPlayerStart } from './play-progress.js';
 
-export { run, chooseManually, startFromHash } from './play-run.js';
-export { isBusy } from './play-job.js';
-export { PlayError } from './play-error.js';
-export {
-  releaseLabel, genreIds, detectKind, normalizeTitles, titleHasSeason, trackerFields, withTracker, inferTracker,
-  packNumbering, absoluteInPack, pickFile, previousEpisodeCtx,
-} from './play-pick.js';
-export { resumeTarget, advanceWatched, timelineHashString } from './play-progress.js';
-export { buildSearchParams, searchTorrents, findReleases, openNativeList } from './play-search.js';
-export { fileInfos } from './play-torrserver.js';
-export { resolveTarget, asksEpisode, chooseEpisode } from './play-target.js';
-export { nextCandidates, tryCandidates } from './play-candidates.js';
+// For home.js (banner «Играть») and notify.js.
+export { run } from './play-run.js';
+export { detectKind, genreIds } from './play-pick.js';
 
 // Lampa's sprite-play, inlined: the new card layout shows buttons icon-only until focused.
 const PLAY_ICON = '<svg viewBox="0 0 28 29" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14.5" r="13" stroke="currentColor" stroke-width="2.7"></circle><path d="M18.0739 13.634C18.7406 14.0189 18.7406 14.9811 18.0739 15.366L11.751 19.0166C11.0843 19.4015 10.251 18.9204 10.251 18.1506L10.251 10.8494C10.251 10.0796 11.0843 9.5985 11.751 9.9834L18.0739 13.634Z" fill="currentColor"></path></svg>';
