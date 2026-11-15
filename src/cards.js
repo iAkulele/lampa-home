@@ -7,12 +7,28 @@ const ROW_TITLES = {
   series: 'Новые сериалы',
   cartoons: 'Новые мультфильмы',
   russian: 'Русское',
+  russian_tv: 'Русские сериалы',
   history: 'Недавно просмотренное',
 };
 
 export function rowTitle(rowKey) {
   return ROW_TITLES[rowKey] || rowKey;
 }
+
+// Anime: TMDB animation (16) from Japan. Discover results carry genre_ids,
+// original_language and origin_country; a full card carries genres instead.
+export function isAnimeCard(card) {
+  if (!card) return false;
+  const ids = Array.isArray(card.genre_ids) ? card.genre_ids : (card.genres || []).map((g) => g && g.id);
+  if (!ids.includes(16)) return false;
+  return card.original_language === 'ja' || (card.origin_country || []).includes('JP');
+}
+
+// Rows and catalogs that hide anime (it has its own row and catalog).
+const NO_ANIME_ROWS = new Set(['series', 'cartoons', 'russian_tv']);
+const NO_ANIME_KINDS = new Set(['tv', 'cartoon']);
+export const rowHidesAnime = (rowKey) => NO_ANIME_ROWS.has(rowKey);
+export const kindHidesAnime = (kind) => NO_ANIME_KINDS.has(kind);
 
 // True when the card shows a Russian title: Cyrillic in the title, or a Russian original.
 export function hasRussianTitle(card) {

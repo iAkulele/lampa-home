@@ -45,7 +45,7 @@ test('test_series_row_excludes_anime', () => {
   const q = rowQuery('series', TODAY);
   assert.strictEqual(q.url, 'discover/tv');
   assert.strictEqual(q.params.filter['air_date.gte'], '2026-10-15');
-  assert.strictEqual(q.params.filter.without_genres, '16');
+  assert.ok(q.params.filter.without_genres.split(',').includes('16'));
 });
 
 test('test_cartoons_row_is_animation_movies', () => {
@@ -199,6 +199,30 @@ test('test_tv_rows_skip_announced_episodes', () => {
   for (const row of ['anime', 'series']) {
     assert.strictEqual(rowQuery(row, TODAY).params.filter['air_date.lte'], TODAY, row);
   }
+});
+
+test('test_russian_tv_row', () => {
+  const q = rowQuery('russian_tv', TODAY);
+  assert.strictEqual(q.url, 'discover/tv');
+  assert.strictEqual(q.params.orig_lang, 'ru');
+  assert.strictEqual(q.params.filter['air_date.lte'], TODAY);
+  assert.strictEqual(q.params.filter.without_genres, '16,10767,10764,10763');
+  assert.strictEqual(q.params.filter['vote_count.gte'], '2');
+  assert.strictEqual(q.params.filter.with_type, '4|2');
+  assert.strictEqual(rowQuery('series', TODAY).params.filter.with_type, '4|2');
+  assert.strictEqual(catalogQuery('tv', { genre: null, year: null, sort: 'new' }, 1, TODAY).params.filter.with_type, '4|2');
+  assert.ok(!('with_type' in catalogQuery('anime', { genre: null, year: null, sort: 'new' }, 1, TODAY).params.filter));
+});
+
+test('test_catalog_tv_lang_ru', () => {
+  const q = catalogQuery('tv', { genre: null, year: null, sort: 'new', lang: 'ru' }, 1, TODAY);
+  assert.strictEqual(q.url, 'discover/tv');
+  assert.strictEqual(q.params.filter.with_original_language, 'ru');
+  assert.strictEqual(q.params.filter['vote_count.gte'], '2');
+  assert.ok(!('with_release_type' in q.params.filter));
+  const n = catalogQuery('tv', { genre: null, year: null, sort: 'new', lang: null }, 1, TODAY);
+  assert.ok(!('with_original_language' in n.params.filter));
+  assert.strictEqual(n.params.filter['vote_count.gte'], '5');
 });
 
 test('test_russian_row_is_ru_language_movies', () => {

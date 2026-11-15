@@ -3,7 +3,7 @@ import { tmdbGet, favoriteGet, store } from './lampa.js';
 import { episodeStatus } from './episodes.js';
 import { createQueue } from './queue.js';
 import { rowQuery } from './tmdb-queries.js';
-import { rowTitle, hasRussianTitle, fillPages } from './cards.js';
+import { rowTitle, hasRussianTitle, fillPages, isAnimeCard, rowHidesAnime } from './cards.js';
 
 const HISTORY_LIMIT = 20;
 
@@ -36,7 +36,8 @@ export function loadRow(rowKey, today = todayIso()) {
   let totalPages = 1;
   const fetchPage = (page) => get(q.url, { ...q.params, page }).then((json) => {
     if (page === 1) totalPages = (json && json.total_pages) || 1;
-    return { cards: ((json && json.results) || []).filter(hasRussianTitle), done: page >= totalPages };
+    const keep = (c) => hasRussianTitle(c) && !(rowHidesAnime(rowKey) && isAnimeCard(c));
+    return { cards: ((json && json.results) || []).filter(keep), done: page >= totalPages };
   });
   return fillPages(fetchPage).then(
     (results) => ({ ...base, results, total_pages: totalPages }),

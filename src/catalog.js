@@ -2,7 +2,7 @@
 // cartoon / anime) with genre, year and sort chips above it.
 import { lampa, tmdbGet, store } from './lampa.js';
 import { catalogQuery, genresFor } from './tmdb-queries.js';
-import { toWideCard, applyPosterClass, hasRussianTitle, attachEpisodeBadge } from './cards.js';
+import { toWideCard, applyPosterClass, hasRussianTitle, attachEpisodeBadge, isAnimeCard, kindHidesAnime } from './cards.js';
 import { todayIso, tvStatus } from './tmdb.js';
 
 const NAME = 'lh_catalog';
@@ -26,6 +26,7 @@ const ROW_PRESETS = {
   series: { kind: 'tv', preset: FRESH },
   cartoons: { kind: 'cartoon', preset: FRESH },
   russian: { kind: 'movie', preset: { ...FRESH, lang: 'ru' } },
+  russian_tv: { kind: 'tv', preset: { ...FRESH, lang: 'ru' } },
 };
 
 export function presetFor(rowKey) {
@@ -98,7 +99,8 @@ function load(object, kind, f, page, seen, ok, fail, extra = EXTRA_PAGES) {
     q.url,
     q.params,
     (json) => {
-      const results = dedupe(((json && json.results) || []).filter(hasRussianTitle), seen).map(toWideCard);
+      const keep = (c) => hasRussianTitle(c) && !(kindHidesAnime(kind) && isAnimeCard(c));
+      const results = dedupe(((json && json.results) || []).filter(keep), seen).map(toWideCard);
       const total = (json && json.total_pages) || 1;
       if (!results.length && extra > 0 && page < total) {
         object.page = page + 1;
@@ -255,7 +257,7 @@ export function register() {
 export function open(kind, preset) {
   if (preset) store.filters.set(kind, applyPreset(store.filters.get(kind), preset));
   const lang = (preset && preset.lang) || null;
-  const title = lang === 'ru' ? 'Русское' : KIND_TITLES[kind];
+  const title = lang === 'ru' ? (kind === 'tv' ? 'Русские сериалы' : 'Русское') : KIND_TITLES[kind];
   lampa().Activity.push({ url: '', component: NAME, kind, lang, title, page: 1, source: 'tmdb' });
 }
 

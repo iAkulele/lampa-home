@@ -245,7 +245,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
 `;
 
   // src/config.js
-  var ROWS = ["movies", "horror", "anime", "series", "cartoons", "russian", "history"];
+  var ROWS = ["movies", "horror", "anime", "series", "cartoons", "russian", "russian_tv", "history"];
   var STORAGE_KEYS = {
     progress: "lh_progress",
     seen: "lh_seen",
@@ -853,6 +853,10 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var GENRE_HORROR_TV_KEYWORDS = [315058, 12377, 3133, 3358, 12339, 256183];
   var GENRE_ANIMATION = 16;
   var GENRE_DOCUMENTARY = 99;
+  var RU_TV_VOTES = 2;
+  var NON_SERIES_TV_GENRES = [10767, 10764, 10763];
+  var SERIES_WITHOUT = [GENRE_ANIMATION, ...NON_SERIES_TV_GENRES].join(",");
+  var SERIES_TYPES = "4|2";
   function genresFor(kind) {
     if (kind === "tv") return GENRES_TV;
     if (kind === "movie") return GENRES_MOVIE;
@@ -928,7 +932,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
           params: {
             sort_by: "popularity.desc",
             filter: {
-              without_genres: String(GENRE_ANIMATION),
+              without_genres: SERIES_WITHOUT,
+              with_type: SERIES_TYPES,
               "air_date.gte": daysAgo(today, 30),
               "air_date.lte": today,
               "vote_count.gte": "5"
@@ -959,6 +964,21 @@ body:not(.no--animation) .lh-catalog .card--wide {
             }
           }
         };
+      case "russian_tv":
+        return {
+          url: "discover/tv",
+          params: {
+            orig_lang: "ru",
+            sort_by: "popularity.desc",
+            filter: {
+              without_genres: SERIES_WITHOUT,
+              with_type: SERIES_TYPES,
+              "air_date.gte": daysAgo(today, 60),
+              "air_date.lte": today,
+              "vote_count.gte": String(RU_TV_VOTES)
+            }
+          }
+        };
       default:
         return null;
     }
@@ -981,12 +1001,13 @@ body:not(.no--animation) .lh-catalog .card--wide {
       params.genres = filters.genre;
     }
     if (kind === "anime") f.with_origin_country = "JP";
+    if (kind === "tv") f.with_type = SERIES_TYPES;
     if (kind === "movie" && filters.genre !== GENRE_ANIMATION) {
       f.without_genres = `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`;
     }
     const dateField = isTv ? "first_air_date" : MOVIE_DATE;
-    if (!isTv && filters.lang === "ru") f.with_original_language = "ru";
-    else if (!isTv) Object.assign(f, movieFilter(today));
+    if (filters.lang === "ru") f.with_original_language = "ru";
+    if (!isTv && filters.lang !== "ru") Object.assign(f, movieFilter(today));
     if (filters.sort === "rating") {
       params.sort_by = "vote_average.desc";
       f["vote_count.gte"] = "100";
@@ -997,7 +1018,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
         f[`${PREMIERE_DATE}.lte`] = today;
         f[`${MOVIE_DATE}.lte`] = today;
       } else f[`${PREMIERE_DATE}.lte`] = digitalCutoff(today);
-      f["vote_count.gte"] = isTv ? "5" : "10";
+      f["vote_count.gte"] = isTv ? filters.lang === "ru" ? String(RU_TV_VOTES) : "5" : "10";
     }
     const range = yearRange(filters.year);
     if (range) {
@@ -1018,11 +1039,22 @@ body:not(.no--animation) .lh-catalog .card--wide {
     series: "\u041D\u043E\u0432\u044B\u0435 \u0441\u0435\u0440\u0438\u0430\u043B\u044B",
     cartoons: "\u041D\u043E\u0432\u044B\u0435 \u043C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B",
     russian: "\u0420\u0443\u0441\u0441\u043A\u043E\u0435",
+    russian_tv: "\u0420\u0443\u0441\u0441\u043A\u0438\u0435 \u0441\u0435\u0440\u0438\u0430\u043B\u044B",
     history: "\u041D\u0435\u0434\u0430\u0432\u043D\u043E \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D\u043D\u043E\u0435"
   };
   function rowTitle(rowKey) {
     return ROW_TITLES[rowKey] || rowKey;
   }
+  function isAnimeCard(card) {
+    if (!card) return false;
+    const ids = Array.isArray(card.genre_ids) ? card.genre_ids : (card.genres || []).map((g) => g && g.id);
+    if (!ids.includes(16)) return false;
+    return card.original_language === "ja" || (card.origin_country || []).includes("JP");
+  }
+  var NO_ANIME_ROWS = /* @__PURE__ */ new Set(["series", "cartoons", "russian_tv"]);
+  var NO_ANIME_KINDS = /* @__PURE__ */ new Set(["tv", "cartoon"]);
+  var rowHidesAnime = (rowKey) => NO_ANIME_ROWS.has(rowKey);
+  var kindHidesAnime = (kind) => NO_ANIME_KINDS.has(kind);
   function hasRussianTitle(card) {
     if (!card) return false;
     return /[Ѐ-ӿ]/.test(card.title || card.name || "") || card.original_language === "ru";
@@ -1138,7 +1170,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
     let totalPages = 1;
     const fetchPage = (page) => get(q.url, { ...q.params, page }).then((json) => {
       if (page === 1) totalPages = json && json.total_pages || 1;
-      return { cards: (json && json.results || []).filter(hasRussianTitle), done: page >= totalPages };
+      const keep = (c) => hasRussianTitle(c) && !(rowHidesAnime(rowKey) && isAnimeCard(c));
+      return { cards: (json && json.results || []).filter(keep), done: page >= totalPages };
     });
     return fillPages(fetchPage).then(
       (results) => ({ ...base, results, total_pages: totalPages }),
@@ -2326,7 +2359,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
     anime: { kind: "anime", preset: FRESH },
     series: { kind: "tv", preset: FRESH },
     cartoons: { kind: "cartoon", preset: FRESH },
-    russian: { kind: "movie", preset: { ...FRESH, lang: "ru" } }
+    russian: { kind: "movie", preset: { ...FRESH, lang: "ru" } },
+    russian_tv: { kind: "tv", preset: { ...FRESH, lang: "ru" } }
   };
   function presetFor(rowKey) {
     const p = ROW_PRESETS[rowKey];
@@ -2381,7 +2415,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
       q.url,
       q.params,
       (json) => {
-        const results = dedupe((json && json.results || []).filter(hasRussianTitle), seen).map(toWideCard);
+        const keep = (c) => hasRussianTitle(c) && !(kindHidesAnime(kind) && isAnimeCard(c));
+        const results = dedupe((json && json.results || []).filter(keep), seen).map(toWideCard);
         const total = json && json.total_pages || 1;
         if (!results.length && extra > 0 && page < total) {
           object.page = page + 1;
@@ -2520,7 +2555,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   function open(kind, preset) {
     if (preset) store.filters.set(kind, applyPreset(store.filters.get(kind), preset));
     const lang = preset && preset.lang || null;
-    const title = lang === "ru" ? "\u0420\u0443\u0441\u0441\u043A\u043E\u0435" : KIND_TITLES[kind];
+    const title = lang === "ru" ? kind === "tv" ? "\u0420\u0443\u0441\u0441\u043A\u0438\u0435 \u0441\u0435\u0440\u0438\u0430\u043B\u044B" : "\u0420\u0443\u0441\u0441\u043A\u043E\u0435" : KIND_TITLES[kind];
     lampa().Activity.push({ url: "", component: NAME, kind, lang, title, page: 1, source: "tmdb" });
   }
   function openHistory() {

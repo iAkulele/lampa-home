@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { toWideCard, rowTitle, hasRussianTitle, fillPages } from '../src/cards.js';
+import { toWideCard, rowTitle, hasRussianTitle, fillPages, isAnimeCard, rowHidesAnime, kindHidesAnime } from '../src/cards.js';
 import { ROWS } from '../src/config.js';
 
 test('test_card_without_backdrop_gets_poster_fallback', () => {
@@ -27,8 +27,24 @@ test('test_row_titles_in_order', () => {
     'Новые сериалы',
     'Новые мультфильмы',
     'Русское',
+    'Русские сериалы',
     'Недавно просмотренное',
   ]);
+});
+
+test('test_is_anime_card', () => {
+  assert.strictEqual(isAnimeCard({ genre_ids: [16, 10759], original_language: 'ja' }), true);
+  assert.strictEqual(isAnimeCard({ genre_ids: [16], original_language: 'en', origin_country: ['JP'] }), true);
+  assert.strictEqual(isAnimeCard({ genres: [{ id: 16 }], original_language: 'ja' }), true);
+  assert.strictEqual(isAnimeCard({ genre_ids: [16], original_language: 'en', origin_country: ['US'] }), false);
+  assert.strictEqual(isAnimeCard({ genre_ids: [18], original_language: 'ja' }), false);
+  assert.strictEqual(isAnimeCard(null), false);
+});
+
+test('test_anime_hidden_in_series_and_cartoons_only', () => {
+  assert.deepStrictEqual(['series', 'cartoons', 'russian_tv'].map(rowHidesAnime), [true, true, true]);
+  assert.deepStrictEqual(['anime', 'movies', 'russian'].map(rowHidesAnime), [false, false, false]);
+  assert.deepStrictEqual(['tv', 'cartoon', 'anime', 'movie'].map(kindHidesAnime), [true, true, false, false]);
 });
 
 test('test_badge_text', async () => {

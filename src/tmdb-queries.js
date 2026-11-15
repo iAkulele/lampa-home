@@ -36,6 +36,14 @@ export const GENRE_HORROR_TV_KEYWORDS = [315058, 12377, 3133, 3358, 12339, 25618
 
 const GENRE_ANIMATION = 16;
 const GENRE_DOCUMENTARY = 99;
+// Russian series collect few votes on TMDB.
+export const RU_TV_VOTES = 2;
+// TV genres that are not series: talk shows, reality, news.
+export const NON_SERIES_TV_GENRES = [10767, 10764, 10763];
+const SERIES_WITHOUT = [GENRE_ANIMATION, ...NON_SERIES_TV_GENRES].join(',');
+// TMDB show types kept in series lists: scripted (4) and miniseries (2); drops
+// talk shows and reality the genre filter misses.
+export const SERIES_TYPES = '4|2';
 
 export function genresFor(kind) {
   if (kind === 'tv') return GENRES_TV;
@@ -128,7 +136,8 @@ export function rowQuery(rowKey, today) {
         params: {
           sort_by: 'popularity.desc',
           filter: {
-            without_genres: String(GENRE_ANIMATION),
+            without_genres: SERIES_WITHOUT,
+            with_type: SERIES_TYPES,
             'air_date.gte': daysAgo(today, 30),
             'air_date.lte': today,
             'vote_count.gte': '5',
@@ -157,6 +166,22 @@ export function rowQuery(rowKey, today) {
             [`${MOVIE_DATE}.lte`]: today,
             without_genres: String(GENRE_DOCUMENTARY),
             'vote_count.gte': '10',
+          },
+        },
+      };
+    case 'russian_tv':
+      // Russian series: few TMDB votes, so a lower floor; last 60 days of episodes.
+      return {
+        url: 'discover/tv',
+        params: {
+          orig_lang: 'ru',
+          sort_by: 'popularity.desc',
+          filter: {
+            without_genres: SERIES_WITHOUT,
+            with_type: SERIES_TYPES,
+            'air_date.gte': daysAgo(today, 60),
+            'air_date.lte': today,
+            'vote_count.gte': String(RU_TV_VOTES),
           },
         },
       };
@@ -190,6 +215,7 @@ export function catalogQuery(kind, filters, page, today) {
     params.genres = filters.genre;
   }
   if (kind === 'anime') f.with_origin_country = 'JP';
+  if (kind === 'tv') f.with_type = SERIES_TYPES;
   // Same as the movies row: animation and documentaries live elsewhere, unless
   // animation is the chosen genre.
   if (kind === 'movie' && filters.genre !== GENRE_ANIMATION) {
@@ -199,8 +225,8 @@ export function catalogQuery(kind, filters, page, today) {
   const dateField = isTv ? 'first_air_date' : MOVIE_DATE;
   // Movies: only titles with a US digital release, the same rule as the home rows.
   // lang 'ru': Russian originals, which release in Russia: no US digital filter.
-  if (!isTv && filters.lang === 'ru') f.with_original_language = 'ru';
-  else if (!isTv) Object.assign(f, movieFilter(today));
+  if (filters.lang === 'ru') f.with_original_language = 'ru';
+  if (!isTv && filters.lang !== 'ru') Object.assign(f, movieFilter(today));
   if (filters.sort === 'rating') {
     params.sort_by = 'vote_average.desc';
     f['vote_count.gte'] = '100';
@@ -214,7 +240,7 @@ export function catalogQuery(kind, filters, page, today) {
     }
     else f[`${PREMIERE_DATE}.lte`] = digitalCutoff(today);
     // A small vote floor drops obscure festival and stub entries from "new".
-    f['vote_count.gte'] = isTv ? '5' : '10';
+    f['vote_count.gte'] = isTv ? (filters.lang === 'ru' ? String(RU_TV_VOTES) : '5') : '10';
   }
   const range = yearRange(filters.year);
   if (range) {
