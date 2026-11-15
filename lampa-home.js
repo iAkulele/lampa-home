@@ -769,15 +769,24 @@ body:not(.no--animation) .lh-catalog .card--wide {
       [`${MOVIE_DATE}.lte`]: digitalCutoff(today)
     };
   }
+  var PREMIERE_DATE = "primary_release_date";
+  var PREMIERE_WINDOW_DAYS = 365;
+  function premiereWindow(today) {
+    return {
+      [`${PREMIERE_DATE}.gte`]: daysAgo(today, PREMIERE_WINDOW_DAYS),
+      [`${PREMIERE_DATE}.lte`]: digitalCutoff(today)
+    };
+  }
   function rowQuery(rowKey, today) {
     switch (rowKey) {
       case "movies":
         return {
           url: "discover/movie",
           params: {
-            sort_by: `${MOVIE_DATE}.desc`,
+            sort_by: `${PREMIERE_DATE}.desc`,
             filter: {
               ...movieFilter(today),
+              ...premiereWindow(today),
               without_genres: `${GENRE_ANIMATION},${GENRE_DOCUMENTARY}`,
               "vote_count.gte": "20"
             }
@@ -788,8 +797,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
           url: "discover/movie",
           params: {
             genres: 27,
-            sort_by: `${MOVIE_DATE}.desc`,
-            filter: { ...movieFilter(today), "vote_count.gte": "20" }
+            sort_by: `${PREMIERE_DATE}.desc`,
+            filter: { ...movieFilter(today), ...premiereWindow(today), "vote_count.gte": "20" }
           }
         };
       case "anime":
@@ -825,8 +834,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
           url: "discover/movie",
           params: {
             genres: GENRE_ANIMATION,
-            sort_by: `${MOVIE_DATE}.desc`,
-            filter: { ...movieFilter(today), "vote_count.gte": "20" }
+            sort_by: `${PREMIERE_DATE}.desc`,
+            filter: { ...movieFilter(today), ...premiereWindow(today), "vote_count.gte": "20" }
           }
         };
       case "russian":
@@ -834,8 +843,10 @@ body:not(.no--animation) .lh-catalog .card--wide {
           url: "discover/movie",
           params: {
             orig_lang: "ru",
-            sort_by: `${MOVIE_DATE}.desc`,
+            sort_by: `${PREMIERE_DATE}.desc`,
             filter: {
+              [`${PREMIERE_DATE}.gte`]: daysAgo(today, PREMIERE_WINDOW_DAYS),
+              [`${PREMIERE_DATE}.lte`]: today,
               [`${MOVIE_DATE}.lte`]: today,
               without_genres: String(GENRE_DOCUMENTARY),
               "vote_count.gte": "10"
@@ -874,14 +885,19 @@ body:not(.no--animation) .lh-catalog .card--wide {
       params.sort_by = "vote_average.desc";
       f["vote_count.gte"] = "100";
     } else {
-      params.sort_by = `${dateField}.desc`;
-      f[`${dateField}.lte`] = !isTv && filters.lang !== "ru" ? digitalCutoff(today) : today;
+      params.sort_by = `${isTv ? dateField : PREMIERE_DATE}.desc`;
+      if (isTv) f[`${dateField}.lte`] = today;
+      else if (filters.lang === "ru") {
+        f[`${PREMIERE_DATE}.lte`] = today;
+        f[`${MOVIE_DATE}.lte`] = today;
+      } else f[`${PREMIERE_DATE}.lte`] = digitalCutoff(today);
       f["vote_count.gte"] = isTv ? "5" : "10";
     }
     const range = yearRange(filters.year);
     if (range) {
-      f[`${dateField}.gte`] = range.from;
-      f[`${dateField}.lte`] = range.to;
+      const rangeField = isTv ? dateField : PREMIERE_DATE;
+      f[`${rangeField}.gte`] = range.from;
+      f[`${rangeField}.lte`] = range.to;
     } else if (filters.year != null) {
       f[isTv ? "first_air_date_year" : "primary_release_year"] = filters.year;
     }
