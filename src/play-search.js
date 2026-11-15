@@ -28,6 +28,9 @@ export function buildSearchParams(card, ctx, parseLang) {
   return searchParamsFor(card, ctx, parseLang, title, original);
 }
 
+// buildSearchParams with the user's parser language.
+export const listParams = (card, ctx) => buildSearchParams(card, ctx, storageField('parse_lang'));
+
 export function openNativeList(params) {
   const L = lampa();
   L.Activity.push({ url: '', title: L.Lang.translate('title_torrents'), component: 'torrents', ...params });

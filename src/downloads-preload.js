@@ -1,9 +1,9 @@
 // «Скачать заранее»: sends a release to TorrServer and asks it to preload the whole
 // file into its disk cache; «Начать закачку» kicks off one that was only marked.
-import { lampa, store, storageField } from './lampa.js';
+import { lampa, store } from './lampa.js';
 import { selectTorrent } from './torrent-select.js';
 import { pickFile, titleHasSeason, inferTracker } from './play-pick.js';
-import { findReleases, openNativeList, buildSearchParams } from './play-search.js';
+import { findReleases, openNativeList, listParams } from './play-search.js';
 import { fileInfos } from './play-torrserver.js';
 import { resolveTarget, asksEpisode, chooseEpisode } from './play-target.js';
 import { isBusy } from './play-job.js';
@@ -68,7 +68,7 @@ export async function preload(card) {
       if (!picked || picked === 'list') {
         job.cancelled = true;
         finish();
-        if (picked === 'list') openNativeList(buildSearchParams(movie, ctx, storageField('parse_lang')));
+        if (picked === 'list') openNativeList(listParams(movie, ctx));
         return;
       }
       ctx = picked;

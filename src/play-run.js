@@ -5,7 +5,7 @@ import { selectTorrent } from './torrent-select.js';
 import { queryTitles, firstQuery } from './search-query.js';
 import { PlayError, fail } from './play-error.js';
 import { detectKind, genreIds, normalizeTitles, titleHasSeason, releaseLabel, pickFile, packNumbering, previousEpisodeCtx, inferTracker } from './play-pick.js';
-import { buildSearchParams, findReleases, openNativeList } from './play-search.js';
+import { listParams, findReleases, openNativeList } from './play-search.js';
 import { addTorrent, pollFiles, fileInfos, buildPlaylist, dropUnlessPreloaded, FILES_TRIES } from './play-torrserver.js';
 import { resolveTarget, asksEpisode, chooseEpisode, withPoster } from './play-target.js';
 import { setPlaying } from './play-progress.js';
@@ -89,7 +89,7 @@ export async function run(card) {
   const finish = job.finish;
 
   const kind = detectKind(card);
-  let params = buildSearchParams(card, { kind }, storageField('parse_lang'));
+  let params = listParams(card, { kind });
   // The parser timeout, TorrServer and several file polls must not add up to
   // minutes: past RUN_TIMEOUT_MS the run stops and the native list opens.
   const arm = () => {
@@ -122,7 +122,7 @@ export async function run(card) {
       if (!picked || picked === 'list') {
         job.cancelled = true;
         finish();
-        if (picked === 'list') openNativeList(buildSearchParams(movie, ctx, storageField('parse_lang')));
+        if (picked === 'list') openNativeList(listParams(movie, ctx));
         return;
       }
       ctx = picked;
@@ -132,7 +132,7 @@ export async function run(card) {
       job.restart(MSG.search);
       arm();
     }
-    params = buildSearchParams(movie, ctx, storageField('parse_lang'));
+    params = listParams(movie, ctx);
 
     const found = await findReleases(movie, ctx, job);
     if (job.cancelled) return;
