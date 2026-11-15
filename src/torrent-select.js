@@ -180,6 +180,8 @@ function hasEpisodePlain(p, ctx) {
     const [a, b] = p.sxeRange.range;
     return p.sxeRange.season === ctx.season && wantEp >= a && wantEp <= b;
   }
+  // "4 сезон — Серия 3": a bare episode number belongs to the title's season tag.
+  if (p.episode && p.episode.season == null && p.seasons && ctx.season != null && !p.seasons.includes(ctx.season)) return false;
   if (p.episode && p.episode.season == null && p.episodeRange) return inRange(ctx.kind === 'anime' ? wantAbs : wantEp);
   if (p.episode) {
     if (p.episode.season != null) {

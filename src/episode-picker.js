@@ -2,7 +2,7 @@
 // with the computed episode, the aired episodes of its season with watched marks,
 // another season and the native torrents list.
 import { lampa, tmdbGet } from './lampa.js';
-import { episodeStatus, trackerPosition } from './episodes.js';
+import { episodeStatus, trackerPosition, absoluteOf } from './episodes.js';
 import { todayIso } from './tmdb.js';
 
 const WATCHED_PERCENT = 85;
@@ -256,7 +256,8 @@ function askMapped({ title, tv, target, progress, view, seasonMap }, tracker) {
           onSelect: (a) => {
             if (a.kind === 'season') return showSeasons(season);
             if (a.kind === 'list') return finish('list');
-            finish({ season: 1, episode: a.absolute });
+            // «Продолжить» of a target missing from the aired list carries no absolute.
+            finish({ season: 1, episode: a.absolute != null ? a.absolute : absoluteOf(seasonMap, a.season, a.episode) });
           },
           onBack: () => (season === tracker.season ? finish(null) : showEpisodes(tracker.season, true)),
         });

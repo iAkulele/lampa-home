@@ -506,6 +506,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }
     return null;
   }
+  function absoluteOf(map, season, episode) {
+    const s = (map || []).find((x) => x && x.season === season);
+    if (!s || !(episode >= 1) || episode > s.count) return null;
+    return Array.isArray(s.episodes) && s.episodes[episode - 1] != null ? s.episodes[episode - 1] : s.start + episode - 1;
+  }
 
   // src/torrent-select.js
   var GiB = 1024 ** 3;
@@ -643,6 +648,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
       const [a, b] = p.sxeRange.range;
       return p.sxeRange.season === ctx.season && wantEp >= a && wantEp <= b;
     }
+    if (p.episode && p.episode.season == null && p.seasons && ctx.season != null && !p.seasons.includes(ctx.season)) return false;
     if (p.episode && p.episode.season == null && p.episodeRange) return inRange(ctx.kind === "anime" ? wantAbs : wantEp);
     if (p.episode) {
       if (p.episode.season != null) {
@@ -1393,7 +1399,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
             onSelect: (a) => {
               if (a.kind === "season") return showSeasons(season);
               if (a.kind === "list") return finish("list");
-              finish({ season: 1, episode: a.absolute });
+              finish({ season: 1, episode: a.absolute != null ? a.absolute : absoluteOf(seasonMap, a.season, a.episode) });
             },
             onBack: () => season === tracker.season ? finish(null) : showEpisodes(tracker.season, true)
           });
@@ -1665,41 +1671,41 @@ body:not(.no--animation) .lh-catalog .card--wide {
   }
   function trackerFields(o) {
     if (!o || o.trackerSeason == null) return {};
-    return { trackerSeason: o.trackerSeason, trackerEpisode: o.trackerEpisode, trackerStart: o.trackerStart };
+    return { trackerSeason: o.trackerSeason, trackerEpisode: o.trackerEpisode, trackerStart: o.trackerStart, trackerCount: o.trackerCount };
   }
   function withTracker(ctx, map, keepMap = true) {
     if (!ctx || !map) return ctx;
-    const { trackerSeason, trackerEpisode, trackerStart, ...rest } = ctx;
+    const { trackerSeason, trackerEpisode, trackerStart, trackerCount, ...rest } = ctx;
     const out = keepMap ? { ...rest, seasonMap: map } : rest;
     const pos = trackerPosition(map, ctx.absolute);
-    return pos ? { ...out, trackerSeason: pos.season, trackerEpisode: pos.episode, trackerStart: pos.start } : out;
+    return pos ? { ...out, trackerSeason: pos.season, trackerEpisode: pos.episode, trackerStart: pos.start, trackerCount: pos.count } : out;
   }
   function inferTracker(ctx, results, names) {
     if (!ctx || ctx.trackerSeason != null || ctx.seasonMap || !(ctx.inferTotal > 0)) return ctx;
     const map = inferSeasonMap(results, { names, total: ctx.inferTotal });
     return map ? withTracker(ctx, map, false) : ctx;
   }
+  function packNumbering(files, ctx) {
+    if (!ctx || ctx.trackerSeason == null || !(ctx.trackerStart > 0)) return null;
+    const count = ctx.trackerCount > 0 ? ctx.trackerCount : Infinity;
+    const bare = (files || []).filter(isVideo).map((f) => parseEpisode(f.path)).filter((ep) => ep.season == null && ep.absolute != null);
+    return bare.some((ep) => ep.absolute > count) ? "absolute" : "season";
+  }
   function absoluteInPack(episode, ctx) {
     if (!(episode > 0) || !ctx || !(ctx.trackerStart > 0)) return episode;
-    return ctx.trackerStart > 1 && episode >= ctx.trackerStart ? episode : ctx.trackerStart - 1 + episode;
-  }
-  function isTrackerPackFile(file, ctx) {
-    if (!file || !ctx || !(ctx.trackerStart > 0)) return false;
-    const n = parseEpisode(file.path).episode;
-    return n != null && n !== ctx.absolute && n === ctx.trackerEpisode;
+    return ctx.trackerStart - 1 + episode;
   }
   function pickFile(files, ctx, infos) {
     const videos = (files || []).filter(isVideo);
     if (!videos.length) return null;
     if (ctx.trackerSeason != null && ctx.kind !== "movie") {
-      const { trackerSeason, trackerEpisode, trackerStart, ...plain } = ctx;
+      const { trackerSeason, trackerEpisode, trackerStart, trackerCount, ...plain } = ctx;
       const sxe = videos.find((f) => {
         const ep = parseEpisode(f.path);
         return ep.season != null && ep.season === trackerSeason && ep.episode === trackerEpisode;
       });
       if (sxe) return sxe;
-      const abs = pickFile(videos, { ...plain, titleHasSeason: false }, infos);
-      if (abs) return abs;
+      if (packNumbering(videos, ctx) === "absolute") return pickFile(videos, { ...plain, titleHasSeason: false }, infos);
       return pickFile(videos, { ...plain, season: trackerSeason, episode: trackerEpisode, absolute: trackerEpisode, titleHasSeason: true }, infos);
     }
     if (ctx.kind === "movie") {
@@ -1969,10 +1975,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
   function buildPlaylist(files, movie, hash, ctx) {
     const L = lampa();
     const tracker = !!ctx && ctx.trackerStart > 0;
+    const defaults = new Set(tracker ? (fileInfos(files, movie) || []).filter((i) => i.defaultSeason).map((i) => i.id) : []);
     const title = movie.original_title || movie.original_name || "";
     return parsePlays(files, movie).map(({ file, info: parsed }) => {
       let info = parsed;
-      if (tracker && info.episode > 0) {
+      if (tracker && info.episode > 0 && (info.season === ctx.trackerSeason || defaults.has(file.id))) {
         const episode = absoluteInPack(info.episode, ctx);
         info = { ...info, season: 1, episode, hash: L.Utils.hash(timelineHashString(1, episode, title)) };
       }
@@ -2101,7 +2108,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     if (job.cancelled || !files) return "cancelled";
     const infos = ctx.index != null ? null : fileInfos(files, movie);
     const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, infos);
-    const playlist = buildPlaylist(files, movie, job.hash, isTrackerPackFile(file, ctx) ? ctx : null);
+    const playlist = buildPlaylist(files, movie, job.hash, file && packNumbering(files, ctx) === "season" ? ctx : null);
     const element = file && playlist.find((p) => p.id === file.id);
     if (!element) {
       const prev = ctx.index != null ? null : previousEpisodeCtx(ctx);

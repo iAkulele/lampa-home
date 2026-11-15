@@ -100,17 +100,19 @@ export function titleHasSeason(title) {
 // The tracker fields of a ctx or a stored entry ({} when there are none).
 export function trackerFields(o) {
   if (!o || o.trackerSeason == null) return {};
-  return { trackerSeason: o.trackerSeason, trackerEpisode: o.trackerEpisode, trackerStart: o.trackerStart };
+  return { trackerSeason: o.trackerSeason, trackerEpisode: o.trackerEpisode, trackerStart: o.trackerStart, trackerCount: o.trackerCount };
 }
 
 // ctx with the tracker position of its absolute episode in map. keepMap: the
 // map came from TMDB before the search (the query then goes without a season).
 export function withTracker(ctx, map, keepMap = true) {
   if (!ctx || !map) return ctx;
-  const { trackerSeason, trackerEpisode, trackerStart, ...rest } = ctx;
+  const { trackerSeason, trackerEpisode, trackerStart, trackerCount, ...rest } = ctx;
   const out = keepMap ? { ...rest, seasonMap: map } : rest;
   const pos = trackerPosition(map, ctx.absolute);
-  return pos ? { ...out, trackerSeason: pos.season, trackerEpisode: pos.episode, trackerStart: pos.start } : out;
+  return pos
+    ? { ...out, trackerSeason: pos.season, trackerEpisode: pos.episode, trackerStart: pos.start, trackerCount: pos.count }
+    : out;
 }
 
 // Single-season anime without a TMDB episode group: tracker seasons inferred
@@ -121,18 +123,22 @@ export function inferTracker(ctx, results, names) {
   return map ? withTracker(ctx, map, false) : ctx;
 }
 
-// Absolute (TMDB) number of a playlist episode of a tracker-season pack:
-// per-season numbers 1..n map to trackerStart.., absolute ones stay.
-export function absoluteInPack(episode, ctx) {
-  if (!(episode > 0) || !ctx || !(ctx.trackerStart > 0)) return episode;
-  return ctx.trackerStart > 1 && episode >= ctx.trackerStart ? episode : ctx.trackerStart - 1 + episode;
+// How a pack in tracker mode numbers its files, decided by the whole file set:
+// 'absolute' when some bare number exceeds the tracker season's episode count
+// (TMDB's numbers), 'season' otherwise (1..n of the tracker season); null
+// outside tracker mode. The tracker season S2 of 24 episodes starting at 13
+// holds 01..24: «20» there is S2E20, not absolute 20.
+export function packNumbering(files, ctx) {
+  if (!ctx || ctx.trackerSeason == null || !(ctx.trackerStart > 0)) return null;
+  const count = ctx.trackerCount > 0 ? ctx.trackerCount : Infinity;
+  const bare = (files || []).filter(isVideo).map((f) => parseEpisode(f.path)).filter((ep) => ep.season == null && ep.absolute != null);
+  return bare.some((ep) => ep.absolute > count) ? 'absolute' : 'season';
 }
 
-// The picked file is numbered within its tracker season (03 for absolute 40).
-export function isTrackerPackFile(file, ctx) {
-  if (!file || !ctx || !(ctx.trackerStart > 0)) return false;
-  const n = parseEpisode(file.path).episode;
-  return n != null && n !== ctx.absolute && n === ctx.trackerEpisode;
+// Absolute (TMDB) number of an episode of a per-season numbered tracker pack.
+export function absoluteInPack(episode, ctx) {
+  if (!(episode > 0) || !ctx || !(ctx.trackerStart > 0)) return episode;
+  return ctx.trackerStart - 1 + episode;
 }
 
 // files: [{id, path, length}]; infos (optional): [{id, season, episode, defaultSeason}]
@@ -145,14 +151,13 @@ export function pickFile(files, ctx, infos) {
   if (ctx.trackerSeason != null && ctx.kind !== 'movie') {
     // Tracker S03E03 in the names; then the absolute number ("40" exists only in
     // an absolutely numbered pack); then the per-season number of a season pack.
-    const { trackerSeason, trackerEpisode, trackerStart, ...plain } = ctx;
+    const { trackerSeason, trackerEpisode, trackerStart, trackerCount, ...plain } = ctx;
     const sxe = videos.find((f) => {
       const ep = parseEpisode(f.path);
       return ep.season != null && ep.season === trackerSeason && ep.episode === trackerEpisode;
     });
     if (sxe) return sxe;
-    const abs = pickFile(videos, { ...plain, titleHasSeason: false }, infos);
-    if (abs) return abs;
+    if (packNumbering(videos, ctx) === 'absolute') return pickFile(videos, { ...plain, titleHasSeason: false }, infos);
     return pickFile(videos, { ...plain, season: trackerSeason, episode: trackerEpisode, absolute: trackerEpisode, titleHasSeason: true }, infos);
   }
   if (ctx.kind === 'movie') {
@@ -484,15 +489,18 @@ export function fileInfos(files, movie) {
 }
 
 // Playlist items shaped like list() in Lampa's interaction/torrent.js.
-// A tracker-season pack (ctx.trackerStart) is renumbered to TMDB's season 1 /
-// absolute episodes: Lampa's timeline marks and lh_progress use those.
+// A per-season numbered tracker pack (ctx given) is renumbered to TMDB's season
+// 1 / absolute episodes: Lampa's timeline marks and lh_progress use those. Only
+// files of the tracker season or without a season marker (Lampa's default):
+// other folders of a multi-season pack keep Lampa's numbers.
 function buildPlaylist(files, movie, hash, ctx) {
   const L = lampa();
   const tracker = !!ctx && ctx.trackerStart > 0;
+  const defaults = new Set(tracker ? (fileInfos(files, movie) || []).filter((i) => i.defaultSeason).map((i) => i.id) : []);
   const title = movie.original_title || movie.original_name || '';
   return parsePlays(files, movie).map(({ file, info: parsed }) => {
     let info = parsed;
-    if (tracker && info.episode > 0) {
+    if (tracker && info.episode > 0 && (info.season === ctx.trackerSeason || defaults.has(file.id))) {
       const episode = absoluteInPack(info.episode, ctx);
       info = { ...info, season: 1, episode, hash: L.Utils.hash(timelineHashString(1, episode, title)) };
     }
@@ -657,7 +665,7 @@ async function playFiles(job, card, movie, ctx, maxTries, filesText = MSG.files)
 
   const infos = ctx.index != null ? null : fileInfos(files, movie);
   const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, infos);
-  const playlist = buildPlaylist(files, movie, job.hash, isTrackerPackFile(file, ctx) ? ctx : null);
+  const playlist = buildPlaylist(files, movie, job.hash, file && packNumbering(files, ctx) === 'season' ? ctx : null);
   const element = file && playlist.find((p) => p.id === file.id);
   if (!element) {
     // The episode before the target is there: the target is just not released yet.

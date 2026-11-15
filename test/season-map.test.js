@@ -5,7 +5,7 @@ import { trackerPosition, absoluteOf } from '../src/episodes.js';
 import { selectTorrent, inferSeasonMap } from '../src/torrent-select.js';
 import { pickerItems, mappedEpisodes, mappedSeasonItems, mappedTarget, watchedEpisodes } from '../src/episode-picker.js';
 import {
-  pickFile, withTracker, inferTracker, previousEpisodeCtx, absoluteInPack, isTrackerPackFile, trackerFields, buildSearchParams,
+  pickFile, withTracker, inferTracker, previousEpisodeCtx, absoluteInPack, packNumbering, trackerFields, buildSearchParams,
 } from '../src/play.js';
 import { TOKYO_GROUP } from './fixtures/tmdb-episode-group.js';
 
@@ -48,7 +48,7 @@ test('test_tracker_position_and_back', () => {
   assert.strictEqual(trackerPosition(MAP, 64), null);
   assert.strictEqual(absoluteOf(MAP, 3, 3), 40);
   assert.strictEqual(absoluteOf(MAP, 4, 14), null);
-  assert.deepStrictEqual(trackerFields(CTX), { trackerSeason: 3, trackerEpisode: 3, trackerStart: 38 });
+  assert.deepStrictEqual(trackerFields(CTX), { trackerSeason: 3, trackerEpisode: 3, trackerStart: 38, trackerCount: 13 });
   assert.deepStrictEqual(trackerFields({ season: 1 }), {});
 });
 
@@ -117,12 +117,12 @@ test('test_tracker_season_pick_file', () => {
   const pack = range(1, 13).map((n) => ({ id: n, path: `Tokyo Revengers S3/Tokyo Revengers - ${String(n).padStart(2, '0')} [1080p].mkv`, length: GiB }));
   const picked = pickFile(pack, { ...CTX, titleHasSeason: true });
   assert.strictEqual(picked.path.endsWith('- 03 [1080p].mkv'), true);
-  assert.strictEqual(isTrackerPackFile(picked, CTX), true);
+  assert.strictEqual(packNumbering(pack, CTX), 'season');
   // Absolute pack: file «40».
   const abs = range(1, 57).map((n) => ({ id: 100 + n, path: `Tokyo Revengers/[AL] Tokyo Revengers - ${String(n).padStart(2, '0')} [1080p].mkv`, length: GiB }));
   const a = pickFile(abs, { ...CTX, titleHasSeason: false });
   assert.strictEqual(a.id, 140);
-  assert.strictEqual(isTrackerPackFile(a, CTX), false);
+  assert.strictEqual(packNumbering(abs, CTX), 'absolute');
   // Even under a season tag a pack that holds «40» is absolutely numbered.
   assert.strictEqual(pickFile(abs, { ...CTX, titleHasSeason: true }).id, 140);
   // SxxEyy names of the tracker season.
@@ -130,11 +130,10 @@ test('test_tracker_season_pick_file', () => {
   assert.strictEqual(pickFile(sxe, { ...CTX, titleHasSeason: true }).id, 203);
   // Playlist renumbering of the pack to absolute numbers.
   assert.deepStrictEqual([1, 3, 13].map((e) => absoluteInPack(e, CTX)), [38, 40, 50]);
-  assert.strictEqual(absoluteInPack(40, CTX), 40);
 });
 
 test('test_tracker_previous_episode_and_search', () => {
-  assert.deepStrictEqual(trackerFields(previousEpisodeCtx(CTX)), { trackerSeason: 3, trackerEpisode: 2, trackerStart: 38 });
+  assert.deepStrictEqual(trackerFields(previousEpisodeCtx(CTX)), { trackerSeason: 3, trackerEpisode: 2, trackerStart: 38, trackerCount: 13 });
   assert.strictEqual(previousEpisodeCtx(withTracker({ kind: 'anime', season: 1, episode: 38, absolute: 38 }, MAP)), null);
   const card = { name: 'Токийские мстители', original_name: 'Tokyo Revengers', first_air_date: '2021-04-11' };
   // A SeasonMap from TMDB: no " S01" suffix; without one Lampa's suffix stays.
@@ -153,7 +152,7 @@ test('test_infer_season_map_from_releases', () => {
   // inferTracker: only with ctx.inferTotal (single-season anime without a group).
   const ctx = { kind: 'anime', season: 1, episode: 40, absolute: 40, inferTotal: 63 };
   const out = inferTracker(ctx, results, NAMES);
-  assert.deepStrictEqual(trackerFields(out), { trackerSeason: 3, trackerEpisode: 3, trackerStart: 38 });
+  assert.deepStrictEqual(trackerFields(out), { trackerSeason: 3, trackerEpisode: 3, trackerStart: 38, trackerCount: 13 });
   assert.strictEqual(out.seasonMap, undefined);
   assert.strictEqual(inferTracker({ ...ctx, inferTotal: undefined }, results, NAMES).trackerSeason, undefined);
 });
@@ -174,4 +173,32 @@ test('test_tracker_real_jacred_titles', () => {
   // Season 4 episode 3 itself is still found by its single-episode release.
   const s4e3 = withTracker({ kind: 'anime', season: 1, episode: 53, absolute: 53 }, MAP);
   assert.strictEqual(find(selectTorrent([item(ep3s4)], { ...s4e3, names: NAMES }), ep3s4).rejected, null);
+});
+
+test('test_tracker_pack_type_by_file_set', () => {
+  // S1 = 12, S2 = 24 (absolute 13-36); target absolute 20 = S2E8.
+  const map = [
+    { season: 1, start: 1, count: 12, episodes: range(1, 12) },
+    { season: 2, start: 13, count: 24, episodes: range(13, 36) },
+  ];
+  const ctx = { ...withTracker({ kind: 'anime', season: 1, episode: 20, absolute: 20 }, map), titleHasSeason: true };
+  assert.deepStrictEqual(trackerFields(ctx), { trackerSeason: 2, trackerEpisode: 8, trackerStart: 13, trackerCount: 24 });
+  const pack = range(1, 24).map((n) => ({ id: n, path: `Show S2/Show - ${String(n).padStart(2, '0')}.mkv`, length: GiB }));
+  assert.strictEqual(packNumbering(pack, ctx), 'season');
+  assert.strictEqual(pickFile(pack, ctx).path, 'Show S2/Show - 08.mkv');
+  assert.deepStrictEqual([1, 8, 20, 24].map((e) => absoluteInPack(e, ctx)), [13, 20, 32, 36]);
+  // A pack running past 24 is absolutely numbered: «20» is absolute 20.
+  const abs = range(1, 36).map((n) => ({ id: 100 + n, path: `Show/Show - ${String(n).padStart(2, '0')}.mkv`, length: GiB }));
+  assert.strictEqual(packNumbering(abs, ctx), 'absolute');
+  assert.strictEqual(pickFile(abs, ctx).id, 120);
+});
+
+test('test_bare_episode_respects_season_tag', () => {
+  const tv = (season, episode) => ({ kind: 'tv', season, episode, absolute: episode, names: ['Сериал'] });
+  const a = 'Сериал 4 сезон — Серия 3 [1080p] LostFilm';
+  const b = 'Сериал (4 сезон, серия 3) [1080p] LostFilm';
+  for (const t of [a, b]) {
+    assert.strictEqual(find(selectTorrent([item(t)], tv(1, 3)), t).rejected, 'episode-missing');
+    assert.strictEqual(find(selectTorrent([item(t)], tv(4, 3)), t).rejected, null);
+  }
 });
