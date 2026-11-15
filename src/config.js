@@ -26,7 +26,7 @@ export const VOICE_STUDIOS = {
   lostfilm: 'lostfilm|лост ?фильм|лост',
   hdrezka: 'hd ?rezka|rezka',
   anidub: 'anidub',
-  anilibria: 'anilibria',
+  anilibria: 'anilibria|aniliberty',
   jaskier: 'jaskier',
   kubik: 'кубик в кубе|kubik',
   newstudio: 'newstudio',
@@ -43,7 +43,27 @@ export const VOICE_PREFERENCE = {
 // Markers of a Russian audio track (regex source). Plain English "dub" is
 // deliberately absent: a "Dub" release without RUS is not counted as Russian.
 export const RUSSIAN_MARKERS =
-  '(?<![\\p{L}\\d])(?:rus(?![\\p{L}\\d])|рус)|дубляж|\\bmvo\\b|\\bdvo\\b|\\bavo\\b|многоголос|двухголос|одноголос|лицензия|itunes|\\bp[12]\\b|(?<![\\p{L}\\d])д(?![\\p{L}\\d])|лост';
+  '(?<![\\p{L}\\d])(?:rus(?![\\p{L}\\d])|рус)|дубляж|дубл\\.|(?<![\\p{L}\\d])дб(?![\\p{L}\\d])|озвуч|(?<![\\p{L}\\d])озв\\.|\\|\\s*d\\s*(?=\\||$)|\\bmvo\\b|\\bdvo\\b|\\bavo\\b|многоголос|двухголос|одноголос|лицензия|itunes|\\bp[12]\\b|(?<![\\p{L}\\d])д(?![\\p{L}\\d])|лост';
+
+// Explicit voice-over / dub markers (stronger than a bare "Rus"): a raw-looking
+// title with one of these is still a voiced release.
+export const VOICE_MARKERS =
+  'дубляж|дубл\\.|(?<![\\p{L}\\d])дб(?![\\p{L}\\d])|озвуч|(?<![\\p{L}\\d])озв\\.|\\bmvo\\b|\\bdvo\\b|\\bavo\\b|многоголос|двухголос|одноголос|\\|\\s*d\\s*(?=\\||$)';
+
+// Russian audio as a separate (external) track: Russian, but scored lower.
+export const EXT_AUDIO_MARKERS = 'rus[\\s.]*\\(?\\s*ext|внешн';
+
+// Raw: original audio without a voice-over.
+export const RAW_MARKERS = '(?<![\\p{L}\\d])raws?(?![\\p{L}\\d])';
+
+// Subtitle-only releases (fansub groups, "Sub", "СТ", "субтитры").
+export const SUBS_ONLY_MARKERS =
+  'subsplease|erai-raws|субтитр|(?<![\\p{L}])subs?(?![\\p{L}])|(?<![\\p{L}\\d])ст(?![\\p{L}\\d])';
+
+// Russian anime voice-over studios (Russian audio); checked for anime only:
+// "JAM", "Amber" are ordinary words in other titles.
+export const ANIME_VOICE_STUDIOS =
+  'anidub|anilibria|aniliberty|anistar|studio ?band|dream ?cast|(?<![\\p{L}\\d])jam(?![\\p{L}\\d])|animaunt|shiza|(?<![\\p{L}\\d])nda(?![\\p{L}\\d])|(?<![\\p{L}\\d])amber(?![\\p{L}\\d])|anirise|persona99|ancord|cuba77';
 
 export const SCREENER_MARKERS =
   'camrip|\\bcam\\b|telesync|\\bts\\b|\\btc\\b|hdts|hdtc|telecine|экранк|\\bline\\b';
@@ -65,6 +85,10 @@ export const SCORING = {
   deadSeeders: 3,
   deadPenalty: 60,
   sizePenaltyPerGiB: 0.2,
+  // Russian audio only as an external track.
+  extAudioPenalty: 25,
+  // Anime release with no audio info at all: used only when nothing explicit is there.
+  unknownVoicePenalty: 40,
 };
 
 // Subtitle-only mentions are stripped before Russian-audio detection:

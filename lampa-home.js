@@ -251,7 +251,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     lostfilm: "lostfilm|\u043B\u043E\u0441\u0442 ?\u0444\u0438\u043B\u044C\u043C|\u043B\u043E\u0441\u0442",
     hdrezka: "hd ?rezka|rezka",
     anidub: "anidub",
-    anilibria: "anilibria",
+    anilibria: "anilibria|aniliberty",
     jaskier: "jaskier",
     kubik: "\u043A\u0443\u0431\u0438\u043A \u0432 \u043A\u0443\u0431\u0435|kubik",
     newstudio: "newstudio",
@@ -262,7 +262,12 @@ body:not(.no--animation) .lh-catalog .card--wide {
     tv: ["lostfilm", "hdrezka"],
     anime: ["anidub", "anilibria"]
   };
-  var RUSSIAN_MARKERS = "(?<![\\p{L}\\d])(?:rus(?![\\p{L}\\d])|\u0440\u0443\u0441)|\u0434\u0443\u0431\u043B\u044F\u0436|\\bmvo\\b|\\bdvo\\b|\\bavo\\b|\u043C\u043D\u043E\u0433\u043E\u0433\u043E\u043B\u043E\u0441|\u0434\u0432\u0443\u0445\u0433\u043E\u043B\u043E\u0441|\u043E\u0434\u043D\u043E\u0433\u043E\u043B\u043E\u0441|\u043B\u0438\u0446\u0435\u043D\u0437\u0438\u044F|itunes|\\bp[12]\\b|(?<![\\p{L}\\d])\u0434(?![\\p{L}\\d])|\u043B\u043E\u0441\u0442";
+  var RUSSIAN_MARKERS = "(?<![\\p{L}\\d])(?:rus(?![\\p{L}\\d])|\u0440\u0443\u0441)|\u0434\u0443\u0431\u043B\u044F\u0436|\u0434\u0443\u0431\u043B\\.|(?<![\\p{L}\\d])\u0434\u0431(?![\\p{L}\\d])|\u043E\u0437\u0432\u0443\u0447|(?<![\\p{L}\\d])\u043E\u0437\u0432\\.|\\|\\s*d\\s*(?=\\||$)|\\bmvo\\b|\\bdvo\\b|\\bavo\\b|\u043C\u043D\u043E\u0433\u043E\u0433\u043E\u043B\u043E\u0441|\u0434\u0432\u0443\u0445\u0433\u043E\u043B\u043E\u0441|\u043E\u0434\u043D\u043E\u0433\u043E\u043B\u043E\u0441|\u043B\u0438\u0446\u0435\u043D\u0437\u0438\u044F|itunes|\\bp[12]\\b|(?<![\\p{L}\\d])\u0434(?![\\p{L}\\d])|\u043B\u043E\u0441\u0442";
+  var VOICE_MARKERS = "\u0434\u0443\u0431\u043B\u044F\u0436|\u0434\u0443\u0431\u043B\\.|(?<![\\p{L}\\d])\u0434\u0431(?![\\p{L}\\d])|\u043E\u0437\u0432\u0443\u0447|(?<![\\p{L}\\d])\u043E\u0437\u0432\\.|\\bmvo\\b|\\bdvo\\b|\\bavo\\b|\u043C\u043D\u043E\u0433\u043E\u0433\u043E\u043B\u043E\u0441|\u0434\u0432\u0443\u0445\u0433\u043E\u043B\u043E\u0441|\u043E\u0434\u043D\u043E\u0433\u043E\u043B\u043E\u0441|\\|\\s*d\\s*(?=\\||$)";
+  var EXT_AUDIO_MARKERS = "rus[\\s.]*\\(?\\s*ext|\u0432\u043D\u0435\u0448\u043D";
+  var RAW_MARKERS = "(?<![\\p{L}\\d])raws?(?![\\p{L}\\d])";
+  var SUBS_ONLY_MARKERS = "subsplease|erai-raws|\u0441\u0443\u0431\u0442\u0438\u0442\u0440|(?<![\\p{L}])subs?(?![\\p{L}])|(?<![\\p{L}\\d])\u0441\u0442(?![\\p{L}\\d])";
+  var ANIME_VOICE_STUDIOS = "anidub|anilibria|aniliberty|anistar|studio ?band|dream ?cast|(?<![\\p{L}\\d])jam(?![\\p{L}\\d])|animaunt|shiza|(?<![\\p{L}\\d])nda(?![\\p{L}\\d])|(?<![\\p{L}\\d])amber(?![\\p{L}\\d])|anirise|persona99|ancord|cuba77";
   var SCREENER_MARKERS = "camrip|\\bcam\\b|telesync|\\bts\\b|\\btc\\b|hdts|hdtc|telecine|\u044D\u043A\u0440\u0430\u043D\u043A|\\bline\\b";
   var DV_MARKERS = "\\bdv\\b|\\bdovi\\b|dolby[ ._-]?vision";
   var DV_P5_MARKERS = "\\bp5\\b|profile ?5";
@@ -277,7 +282,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
     seedsFactor: 5,
     deadSeeders: 3,
     deadPenalty: 60,
-    sizePenaltyPerGiB: 0.2
+    sizePenaltyPerGiB: 0.2,
+    // Russian audio only as an external track.
+    extAudioPenalty: 25,
+    // Anime release with no audio info at all: used only when nothing explicit is there.
+    unknownVoicePenalty: 40
   };
   var SUB_WORD = "(?:sub(?:s|titles?)?(?!\\p{L})|\u0441\u0443\u0431\u0442\u0438\u0442\u0440\\p{L}*)";
   var SUB_LANG = "(?:(?:rus|eng|ukr|jap)\\p{L}*|\u0440\u0443\u0441\\p{L}*|\u0430\u043D\u0433\u043B\\p{L}*|\u0443\u043A\u0440\\p{L}*)";
@@ -464,6 +473,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var RE_DV = re(DV_MARKERS);
   var RE_DV_P5 = re(DV_P5_MARKERS);
   var RE_HDR = re(HDR_MARKERS);
+  var RE_VOICE = re(VOICE_MARKERS);
+  var RE_EXT = re(EXT_AUDIO_MARKERS);
+  var RE_RAW = re(RAW_MARKERS);
+  var RE_SUBS_ONLY = re(SUBS_ONLY_MARKERS);
+  var RE_ANIME_STUDIO = re(ANIME_VOICE_STUDIOS);
   var STUDIO_RES = Object.entries(VOICE_STUDIOS).map(([id, src]) => [id, re(src)]);
   function detectStudio(title) {
     for (const [id, rx] of STUDIO_RES) if (rx.test(title)) return id;
@@ -548,6 +562,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
       hdr,
       russian: RE_RUSSIAN.test(audioText) || studio !== null,
       voice: detectVoice(t, studio, audioText),
+      explicitVoice: studio !== null || RE_VOICE.test(audioText),
+      extAudio: RE_EXT.test(t),
+      raw: RE_RAW.test(t),
+      subsOnly: RE_SUBS_ONLY.test(t),
+      animeStudio: RE_ANIME_STUDIO.test(audioText),
       studio,
       audio: detectAudio(t),
       seasons: detectSeasons(t),
@@ -579,10 +598,72 @@ body:not(.no--animation) .lh-catalog .card--wide {
     if (p.episodeRange) return inRange(ctx.kind === "anime" ? wantAbs : wantEp);
     return true;
   }
+  var norm = (s) => String(s || "").toLowerCase().replace(/ё/g, "\u0435").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  var SHORT_NAME = 8;
+  function containsName(title, name) {
+    const n = norm(name);
+    if (!n) return false;
+    const t = norm(title);
+    return n.length < SHORT_NAME ? (" " + t + " ").includes(" " + n + " ") : t.includes(n);
+  }
+  function isRelevant(title, names) {
+    const list = (names || []).filter((n) => norm(n));
+    if (!list.length) return true;
+    return list.some((n) => containsName(title, n));
+  }
+  var RU_LANG = /^(?:rus?|russian)$/i;
+  var UKR_LETTERS = /[іїєґ]|укр/i;
+  var UNKNOWN_LANG = /^(?:|und|unk|unknown|mis|mul|zxx)$/i;
+  function streamIsRussian(s) {
+    const tags = s && s.tags || {};
+    const lang = String(tags.language || "").trim();
+    if (RU_LANG.test(lang)) return true;
+    if (!UNKNOWN_LANG.test(lang)) return false;
+    const name = String(tags.title || "");
+    return /\p{Script=Cyrillic}/u.test(name) && !UKR_LETTERS.test(name) || /(?<![\p{L}])rus/iu.test(name);
+  }
+  function audioFromFfprobe(ffprobe) {
+    const audio = (Array.isArray(ffprobe) ? ffprobe : []).filter((s) => s && s.codec_type === "audio");
+    if (!audio.length) return "unknown";
+    if (audio.some(streamIsRussian)) return "ru";
+    return audio.every((s) => !UNKNOWN_LANG.test(String(s.tags && s.tags.language || "").trim())) ? "none" : "unknown";
+  }
+  function audioFromResult(result) {
+    const probe = audioFromFfprobe(result && result.ffprobe);
+    if (probe === "ru") return "ru";
+    const langs = Array.isArray(result && result.languages) ? result.languages.map(String) : [];
+    if (langs.some((l) => RU_LANG.test(l))) return "ru";
+    if (probe === "none" || langs.length) return "none";
+    return "unknown";
+  }
+  var cyrillic = (s) => /\p{Script=Cyrillic}/u.test(String(s || ""));
+  function classifyAudio(p, result, ctx) {
+    const anime = ctx.kind === "anime";
+    const title = String(result && result.Title || "");
+    const info = result && result.info;
+    const voices = info && Array.isArray(info.voices) ? info.voices.join(" ") : "";
+    const animeStudio = anime && (p.animeStudio || RE_ANIME_STUDIO.test(voices));
+    const out = (russian, voice, extra) => ({ russian, voice, studio: p.studio, penalty: 0, reason: null, ...extra });
+    if (p.raw && !(p.explicitVoice || animeStudio)) return out(false, null, { reason: "raw" });
+    if (p.extAudio) return out(true, p.voice || "other", { penalty: SCORING.extAudioPenalty });
+    if (p.russian || animeStudio) return out(true, p.voice || "other");
+    const meta = audioFromResult(result);
+    if (meta === "ru") {
+      const studio = detectStudio(voices);
+      return out(true, detectVoice("", studio, "") || "other", { studio });
+    }
+    if (meta === "none") return out(false, null, { reason: "no-russian" });
+    const ruNames = (ctx.names || []).filter(cyrillic);
+    if (anime && !p.subsOnly && ruNames.some((n) => containsName(title, n))) {
+      return out(false, "unknown", { penalty: SCORING.unknownVoicePenalty });
+    }
+    return out(false, null, { reason: "no-russian" });
+  }
   function rejectReason(p, result, ctx) {
+    if (!isRelevant(result.Title, ctx.names)) return "unrelated";
     if (p.screener) return "screener";
     if (p.dvOnly) return "dv-only";
-    if (!p.russian) return "no-russian";
+    if (p.audioReason) return p.audioReason;
     if (ctx.kind === "movie" && Number(result.Size) > LIMITS.maxMovieBytes) return "oversize";
     if ((ctx.kind === "tv" || ctx.kind === "anime") && !hasEpisode(p, ctx)) return "episode-missing";
     return null;
@@ -603,12 +684,14 @@ body:not(.no--animation) .lh-catalog .card--wide {
     let seeds = Math.min(W.seedsCap, Math.log2(seeders + 1) * W.seedsFactor);
     if (seeders < W.deadSeeders) seeds -= W.deadPenalty;
     const sizePenalty = (Number(result.Size) || 0) / GiB * W.sizePenaltyPerGiB;
-    return quality + voice + audio + seeds - sizePenalty;
+    return quality + voice + audio + seeds - sizePenalty - (p.audioPenalty || 0);
   }
   function selectTorrent(results, ctx) {
     const scored = (results || []).map((result) => {
-      const p = parseTitle(result.Title);
-      return { result, score: score(p, result, ctx), rejected: rejectReason(p, result, ctx) };
+      const title = parseTitle(result.Title);
+      const a = classifyAudio(title, result, ctx);
+      const p = { ...title, russian: a.russian, voice: a.voice, studio: a.studio, audioPenalty: a.penalty, audioReason: a.reason };
+      return { result, score: score(p, result, ctx), rejected: rejectReason(p, result, ctx), voice: p.voice };
     });
     scored.sort((a, b) => (a.rejected ? 1 : 0) - (b.rejected ? 1 : 0) || b.score - a.score);
     const top = scored.find((s) => !s.rejected);
@@ -937,17 +1020,136 @@ body:not(.no--animation) .lh-catalog .card--wide {
     );
   }
 
+  // src/search-query.js
+  var MIN_TITLE = 4;
+  var MAX_TITLE = 60;
+  var LONG_TITLE = 40;
+  var FEW_RESULTS = 5;
+  var FOREIGN = /(?=\p{L})[^\p{Script=Latin}\p{Script=Cyrillic}]/u;
+  function isLatinOrCyrillic(str) {
+    const s = String(str || "");
+    return /\p{L}/u.test(s) && !FOREIGN.test(s);
+  }
+  function isLatin(str) {
+    const s = String(str || "");
+    return isLatinOrCyrillic(s) && /\p{Script=Latin}/u.test(s) && !/\p{Script=Cyrillic}/u.test(s);
+  }
+  function shortTitle(name) {
+    const original = String(name || "").trim();
+    let s = original;
+    const cuts = [":", " \u2014 ", " \u2013 ", " ~ ", "("].map((c) => s.indexOf(c)).filter((i) => i >= 0);
+    if (cuts.length) s = s.slice(0, Math.min(...cuts)).trim();
+    if (s.length < MIN_TITLE) s = original;
+    if (s.length > MAX_TITLE) {
+      const head = s.slice(0, MAX_TITLE + 1);
+      const space = head.lastIndexOf(" ");
+      s = (space >= MIN_TITLE ? head.slice(0, space) : s.slice(0, MAX_TITLE)).trim();
+    }
+    return s;
+  }
+  function queryTitle(name) {
+    const s = String(name || "").trim();
+    if (!isLatinOrCyrillic(s)) return "";
+    return s.length > LONG_TITLE ? shortTitle(s) : s;
+  }
+  function latinAltTitles(json) {
+    const list = json && (json.results || json.titles) || [];
+    const rank = (c) => c === "JP" ? 0 : c === "US" ? 1 : 2;
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    list.filter((t) => t && (t.iso_3166_1 === "JP" || t.iso_3166_1 === "US") && isLatin(t.title)).sort((a, b) => rank(a.iso_3166_1) - rank(b.iso_3166_1)).forEach((t) => {
+      const s = shortTitle(t.title);
+      const key = s.toLowerCase();
+      if (s.length >= MIN_TITLE && !seen.has(key)) {
+        seen.add(key);
+        out.push(s);
+      }
+    });
+    return out;
+  }
+  function queryTitles(card, alts = []) {
+    const ru = queryTitle(card.title || card.name);
+    const rawOriginal = card.original_title || card.original_name || "";
+    const original = queryTitle(rawOriginal);
+    const alt = alts[0] || "";
+    const title = ru || alt || original;
+    const names = [];
+    const add = (n) => {
+      const s = shortTitle(n);
+      if (s && isLatinOrCyrillic(s) && !names.some((x) => x.toLowerCase() === s.toLowerCase())) names.push(s);
+    };
+    [card.title || card.name, rawOriginal, ...alts].forEach(add);
+    return { title, original: original || title, alt, names };
+  }
+  function searchParamsFor(card, ctx, parseLang, title, original) {
+    const year = String(card.first_air_date || card.release_date || "0000").slice(0, 4);
+    const combinations = {
+      df: original,
+      df_year: original + " " + year,
+      df_lg: original + " " + title,
+      df_lg_year: original + " " + title + " " + year,
+      lg: title,
+      lg_year: title + " " + year,
+      lg_df: title + " " + original,
+      lg_df_year: title + " " + original + " " + year
+    };
+    const s = ctx && ctx.kind !== "movie" && Number.isInteger(ctx.season) && ctx.season >= 0 ? ctx.season : null;
+    const season = s == null ? "" : " S" + (s < 10 ? "0" : "") + s;
+    return {
+      search: (combinations[parseLang] || original || title) + season,
+      search_one: title + season,
+      search_two: original + season,
+      movie: card,
+      page: 1
+    };
+  }
+  var withTitles = (card, title, original) => ({ ...card, title, original_title: original });
+  function firstQuery(card, ctx, parseLang, t) {
+    const movie = withTitles(card, t.title, t.original);
+    return searchParamsFor(movie, ctx, parseLang, t.title, t.original);
+  }
+  function secondQuery(card, ctx, t) {
+    if (!t.alt) return null;
+    const same = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+    if (same(t.alt, t.title) || same(t.alt, t.original)) return null;
+    const movie = withTitles(card, t.title, t.alt);
+    return searchParamsFor(movie, ctx, "df", t.title, t.alt);
+  }
+  var needSecond = (kind, count) => kind === "anime" || count < FEW_RESULTS;
+  function mergeResults(...lists) {
+    const out = [];
+    const links = /* @__PURE__ */ new Set();
+    const titles = /* @__PURE__ */ new Set();
+    for (const list of lists) {
+      for (const r of list || []) {
+        if (!r) continue;
+        const link = r.MagnetUri || r.Link || "";
+        const title = String(r.Title || "").trim().toLowerCase();
+        if (link && links.has(link) || title && titles.has(title)) continue;
+        if (link) links.add(link);
+        if (title) titles.add(title);
+        out.push(r);
+      }
+    }
+    return out;
+  }
+
   // src/play.js
   var ANIMATION = 16;
   var VIDEO = ["asf", "wmv", "divx", "avi", "mp4", "m4v", "mov", "3gp", "3g2", "mkv", "trp", "tp", "mts", "mpg", "mpeg", "dat", "vob", "rm", "rmvb", "m2ts", "ts"];
   var INDIVIDUAL = ["vob", "m2ts"];
   var FILES_EVERY_MS = 2e3;
   var WATCHED_PERCENT = 85;
-  var FILES_TRIES = 45;
-  var FILES_TRIES_EXTRA = 15;
+  var FILES_TRIES = 20;
+  var FILES_TRIES_EXTRA = 10;
   var HASH_TIMEOUT_MS = 2e4;
   var MAX_CANDIDATES = 3;
   var RUN_TIMEOUT_MS = 9e4;
+  var QUERY_GAP_MS = 1200;
+  var RETRY_FAST_MS = 500;
+  var RETRY_AFTER_MS = 2e3;
+  var RESULTS_TTL_MS = 6e4;
+  var ALT_TIMEOUT_MS = 5e3;
   var MSG = {
     search: "\u0418\u0449\u0443 \u0440\u0430\u0437\u0434\u0430\u0447\u0443\u2026",
     server: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u0432 TorrServer\u2026",
@@ -1064,26 +1266,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   function buildSearchParams(card, ctx, parseLang) {
     const title = card.title || card.name || "";
     const original = card.original_title || card.original_name || title;
-    const year = String(card.first_air_date || card.release_date || "0000").slice(0, 4);
-    const combinations = {
-      df: original,
-      df_year: original + " " + year,
-      df_lg: original + " " + title,
-      df_lg_year: original + " " + title + " " + year,
-      lg: title,
-      lg_year: title + " " + year,
-      lg_df: title + " " + original,
-      lg_df_year: title + " " + original + " " + year
-    };
-    const s = ctx && ctx.kind !== "movie" && Number.isInteger(ctx.season) && ctx.season >= 0 ? ctx.season : null;
-    const season = s == null ? "" : " S" + (s < 10 ? "0" : "") + s;
-    return {
-      search: (combinations[parseLang] || original || title) + season,
-      search_one: title + season,
-      search_two: original + season,
-      movie: card,
-      page: 1
-    };
+    return searchParamsFor(card, ctx, parseLang, title, original);
   }
   function withTimeout(promise, ms, msg) {
     let timer;
@@ -1118,6 +1301,63 @@ body:not(.no--animation) .lh-catalog .card--wide {
       L.Parser.get(params, (data) => resolve(data && data.Results || []), () => reject(fail(MSG.parser)));
     });
     return withTimeout(req, LIMITS.searchTimeoutMs, MSG.parser);
+  }
+  var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function searchOnce(params, job) {
+    const started = Date.now();
+    try {
+      return await searchTorrents(params);
+    } catch (err) {
+      if (job && job.cancelled || Date.now() - started >= RETRY_FAST_MS) throw err;
+      await sleep(RETRY_AFTER_MS);
+      if (job && job.cancelled) throw err;
+      return searchTorrents(params);
+    }
+  }
+  var altCache = /* @__PURE__ */ new Map();
+  function altTitles(kind, id) {
+    if (id == null) return Promise.resolve([]);
+    const key = (kind === "movie" ? "movie/" : "tv/") + id;
+    if (altCache.has(key)) return Promise.resolve(altCache.get(key));
+    const req = new Promise((resolve, reject) => {
+      lampa().Api.sources.tmdb.get(key + "/alternative_titles", {}, resolve, reject);
+    });
+    return withTimeout(req, ALT_TIMEOUT_MS, MSG.parser).then(
+      (json) => {
+        const list = latinAltTitles(json);
+        altCache.set(key, list);
+        return list;
+      },
+      () => []
+    );
+  }
+  var resultsCache = /* @__PURE__ */ new Map();
+  async function findReleases(movie, ctx, job) {
+    const key = [movie.id, ctx.kind, ctx.season].join(":");
+    const hit = resultsCache.get(key);
+    if (hit && Date.now() - hit.at < RESULTS_TTL_MS) return hit.value;
+    const original = movie.original_title || movie.original_name || "";
+    let alts = ctx.kind === "anime" || !isLatinOrCyrillic(original) ? await altTitles(ctx.kind, movie.id) : null;
+    let titles = queryTitles(movie, alts || []);
+    const params = firstQuery(movie, ctx, storageField("parse_lang"), titles);
+    const first = await searchOnce(params, job);
+    const firstDone = Date.now();
+    let second = [];
+    if (!(job && job.cancelled) && needSecond(ctx.kind, first.length)) {
+      if (!alts) {
+        alts = await altTitles(ctx.kind, movie.id);
+        titles = { ...queryTitles(movie, alts), title: titles.title, original: titles.original };
+      }
+      const q2 = secondQuery(movie, ctx, titles);
+      if (q2) {
+        const wait = QUERY_GAP_MS - (Date.now() - firstDone);
+        if (wait > 0) await sleep(wait);
+        if (!(job && job.cancelled)) second = await searchOnce(q2, job).catch(() => []);
+      }
+    }
+    const value = { results: mergeResults(first, second), names: titles.names, params };
+    if (!(job && job.cancelled)) resultsCache.set(key, { at: Date.now(), value });
+    return value;
   }
   function addTorrent(result, movie) {
     const L = lampa();
@@ -1316,9 +1556,10 @@ body:not(.no--animation) .lh-catalog .card--wide {
       const { movie, ctx } = await resolveTarget(card);
       if (job.cancelled) return;
       params = buildSearchParams(movie, ctx, storageField("parse_lang"));
-      const results = await searchTorrents(params);
+      const found = await findReleases(movie, ctx, job);
       if (job.cancelled) return;
-      const candidates2 = nextCandidates(selectTorrent(results, ctx).scored);
+      params = { ...params, search: found.params.search };
+      const candidates2 = nextCandidates(selectTorrent(found.results, { ...ctx, names: found.names }).scored);
       if (!candidates2.length) {
         finish();
         L.Noty.show(MSG.none);
@@ -2222,9 +2463,9 @@ body:not(.no--animation) .lh-catalog .card--wide {
       tsBase();
       const { movie, ctx } = await resolveTarget(card);
       if (job.cancelled) return;
-      const results = await searchTorrents(buildSearchParams(movie, ctx, storageField("parse_lang")));
+      const found = await findReleases(movie, ctx, job);
       if (job.cancelled) return;
-      const { chosen } = selectTorrent(results, ctx);
+      const { chosen } = selectTorrent(found.results, { ...ctx, names: found.names });
       if (!chosen) throw fail2(MSG2.none);
       L.Loading.setText(MSG2.server);
       before = await listDownloads().catch(() => cachedDownloads());

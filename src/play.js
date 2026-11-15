@@ -5,6 +5,9 @@ import { LIMITS } from './config.js';
 import { selectTorrent, parseTitle } from './torrent-select.js';
 import { episodeStatus, nextEpisode, absoluteEpisode, parseEpisode } from './episodes.js';
 import { loadTv, todayIso } from './tmdb.js';
+import {
+  isLatinOrCyrillic, latinAltTitles, queryTitles, firstQuery, secondQuery, needSecond, mergeResults, searchParamsFor,
+} from './search-query.js';
 
 const ANIMATION = 16;
 // Same list as Lampa's interaction/torrent.js.
@@ -12,14 +15,22 @@ const VIDEO = ['asf', 'wmv', 'divx', 'avi', 'mp4', 'm4v', 'mov', '3gp', '3g2', '
 const INDIVIDUAL = ['vob', 'm2ts'];
 const FILES_EVERY_MS = 2000;
 const WATCHED_PERCENT = 85;
-const FILES_TRIES = 45;
-// Extra candidates get a shorter wait for their file list (15 × 2 s).
-const FILES_TRIES_EXTRA = 15;
+const FILES_TRIES = 20;
+// Extra candidates get a shorter wait for their file list (10 × 2 s).
+const FILES_TRIES_EXTRA = 10;
 const HASH_TIMEOUT_MS = 20000;
 // Releases «Играть» tries before giving up on the episode.
 const MAX_CANDIDATES = 3;
 // Whole «Играть» run (search + every candidate) never keeps the loader longer.
 const RUN_TIMEOUT_MS = 90000;
+// jac.red answers HTTP 429 to a second request within about a second.
+const QUERY_GAP_MS = 1200;
+// A parser failure faster than this is a rate limit, not a dead parser: one retry.
+const RETRY_FAST_MS = 500;
+const RETRY_AFTER_MS = 2000;
+// «Играть» then «Скачать заранее» (or a second press) reuse the search.
+const RESULTS_TTL_MS = 60000;
+const ALT_TIMEOUT_MS = 5000;
 
 const MSG = {
   search: 'Ищу раздачу…',
@@ -169,30 +180,11 @@ export function timelineHashString(season, episode, originalTitle) {
   return [season, season > 10 ? ':' : '', episode, originalTitle].join('');
 }
 
-// Mirrors Lampa's components/full/start/torrents.js.
+// Mirrors Lampa's components/full/start/torrents.js (the native list's params).
 export function buildSearchParams(card, ctx, parseLang) {
   const title = card.title || card.name || '';
   const original = card.original_title || card.original_name || title;
-  const year = String(card.first_air_date || card.release_date || '0000').slice(0, 4);
-  const combinations = {
-    df: original,
-    df_year: original + ' ' + year,
-    df_lg: original + ' ' + title,
-    df_lg_year: original + ' ' + title + ' ' + year,
-    lg: title,
-    lg_year: title + ' ' + year,
-    lg_df: title + ' ' + original,
-    lg_df_year: title + ' ' + original + ' ' + year,
-  };
-  const s = ctx && ctx.kind !== 'movie' && Number.isInteger(ctx.season) && ctx.season >= 0 ? ctx.season : null;
-  const season = s == null ? '' : ' S' + (s < 10 ? '0' : '') + s;
-  return {
-    search: (combinations[parseLang] || original || title) + season,
-    search_one: title + season,
-    search_two: original + season,
-    movie: card,
-    page: 1,
-  };
+  return searchParamsFor(card, ctx, parseLang, title, original);
 }
 
 // ---------- Lampa side ----------
@@ -237,6 +229,75 @@ export function searchTorrents(params) {
     L.Parser.get(params, (data) => resolve((data && data.Results) || []), () => reject(fail(MSG.parser)));
   });
   return withTimeout(req, LIMITS.searchTimeoutMs, MSG.parser);
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// One parser query; a failure within RETRY_FAST_MS (jac.red's 429) is retried once after 2 s.
+async function searchOnce(params, job) {
+  const started = Date.now();
+  try {
+    return await searchTorrents(params);
+  } catch (err) {
+    if ((job && job.cancelled) || Date.now() - started >= RETRY_FAST_MS) throw err;
+    await sleep(RETRY_AFTER_MS);
+    if (job && job.cancelled) throw err;
+    return searchTorrents(params);
+  }
+}
+
+const altCache = new Map();
+
+// Latin alternative titles of the card (TMDB alternative_titles), cached per card; [] on failure.
+function altTitles(kind, id) {
+  if (id == null) return Promise.resolve([]);
+  const key = (kind === 'movie' ? 'movie/' : 'tv/') + id;
+  if (altCache.has(key)) return Promise.resolve(altCache.get(key));
+  const req = new Promise((resolve, reject) => {
+    lampa().Api.sources.tmdb.get(key + '/alternative_titles', {}, resolve, reject);
+  });
+  return withTimeout(req, ALT_TIMEOUT_MS, MSG.parser).then(
+    (json) => {
+      const list = latinAltTitles(json);
+      altCache.set(key, list);
+      return list;
+    },
+    () => [],
+  );
+}
+
+const resultsCache = new Map();
+
+// Parser results for the target: Q1 by the (short) RU title; Q2 by the Latin
+// alternative title for anime or when Q1 found little, at least 1.2 s later.
+// -> {results, names (for selectTorrent's relevance check), params (Q1)}.
+export async function findReleases(movie, ctx, job) {
+  const key = [movie.id, ctx.kind, ctx.season].join(':');
+  const hit = resultsCache.get(key);
+  if (hit && Date.now() - hit.at < RESULTS_TTL_MS) return hit.value;
+
+  const original = movie.original_title || movie.original_name || '';
+  let alts = ctx.kind === 'anime' || !isLatinOrCyrillic(original) ? await altTitles(ctx.kind, movie.id) : null;
+  let titles = queryTitles(movie, alts || []);
+  const params = firstQuery(movie, ctx, storageField('parse_lang'), titles);
+  const first = await searchOnce(params, job);
+  const firstDone = Date.now();
+  let second = [];
+  if (!(job && job.cancelled) && needSecond(ctx.kind, first.length)) {
+    if (!alts) {
+      alts = await altTitles(ctx.kind, movie.id);
+      titles = { ...queryTitles(movie, alts), title: titles.title, original: titles.original };
+    }
+    const q2 = secondQuery(movie, ctx, titles);
+    if (q2) {
+      const wait = QUERY_GAP_MS - (Date.now() - firstDone);
+      if (wait > 0) await sleep(wait);
+      if (!(job && job.cancelled)) second = await searchOnce(q2, job).catch(() => []);
+    }
+  }
+  const value = { results: mergeResults(first, second), names: titles.names, params };
+  if (!(job && job.cancelled)) resultsCache.set(key, { at: Date.now(), value });
+  return value;
 }
 
 function addTorrent(result, movie) {
@@ -480,9 +541,11 @@ export async function run(card) {
     if (job.cancelled) return;
     params = buildSearchParams(movie, ctx, storageField('parse_lang'));
 
-    const results = await searchTorrents(params);
+    const found = await findReleases(movie, ctx, job);
     if (job.cancelled) return;
-    const candidates = nextCandidates(selectTorrent(results, ctx).scored);
+    // The native list opens on the query that worked, with Lampa's own card.
+    params = { ...params, search: found.params.search };
+    const candidates = nextCandidates(selectTorrent(found.results, { ...ctx, names: found.names }).scored);
     if (!candidates.length) {
       finish();
       L.Noty.show(MSG.none);

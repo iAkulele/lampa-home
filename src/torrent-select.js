@@ -11,6 +11,11 @@ import {
   DV_P5_MARKERS,
   HDR_MARKERS,
   SCORING,
+  VOICE_MARKERS,
+  EXT_AUDIO_MARKERS,
+  RAW_MARKERS,
+  SUBS_ONLY_MARKERS,
+  ANIME_VOICE_STUDIOS,
 } from './config.js';
 
 const GiB = 1024 ** 3;
@@ -22,6 +27,11 @@ const RE_SCREENER = re(SCREENER_MARKERS);
 const RE_DV = re(DV_MARKERS);
 const RE_DV_P5 = re(DV_P5_MARKERS);
 const RE_HDR = re(HDR_MARKERS);
+const RE_VOICE = re(VOICE_MARKERS);
+const RE_EXT = re(EXT_AUDIO_MARKERS);
+const RE_RAW = re(RAW_MARKERS);
+const RE_SUBS_ONLY = re(SUBS_ONLY_MARKERS);
+const RE_ANIME_STUDIO = re(ANIME_VOICE_STUDIOS);
 const STUDIO_RES = Object.entries(VOICE_STUDIOS).map(([id, src]) => [id, re(src)]);
 
 function detectStudio(title) {
@@ -120,6 +130,11 @@ export function parseTitle(title) {
     hdr,
     russian: RE_RUSSIAN.test(audioText) || studio !== null,
     voice: detectVoice(t, studio, audioText),
+    explicitVoice: studio !== null || RE_VOICE.test(audioText),
+    extAudio: RE_EXT.test(t),
+    raw: RE_RAW.test(t),
+    subsOnly: RE_SUBS_ONLY.test(t),
+    animeStudio: RE_ANIME_STUDIO.test(audioText),
     studio,
     audio: detectAudio(t),
     seasons: detectSeasons(t),
@@ -156,10 +171,97 @@ function hasEpisode(p, ctx) {
   return true;
 }
 
+// ---------- title relevance ----------
+
+const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const SHORT_NAME = 8;
+
+function containsName(title, name) {
+  const n = norm(name);
+  if (!n) return false;
+  const t = norm(title);
+  return n.length < SHORT_NAME ? (' ' + t + ' ').includes(' ' + n + ' ') : t.includes(n);
+}
+
+// Does the release title name the show (any of its names)? No names: no check.
+export function isRelevant(title, names) {
+  const list = (names || []).filter((n) => norm(n));
+  if (!list.length) return true;
+  return list.some((n) => containsName(title, n));
+}
+
+// ---------- audio metadata (JacRed: ffprobe, languages, info.voices) ----------
+
+const RU_LANG = /^(?:rus?|russian)$/i;
+const UKR_LETTERS = /[іїєґ]|укр/i;
+const UNKNOWN_LANG = /^(?:|und|unk|unknown|mis|mul|zxx)$/i;
+
+// One ffprobe audio stream: Russian by its language tag, or (no language tag)
+// by a Cyrillic / "rus" track name that is not Ukrainian.
+function streamIsRussian(s) {
+  const tags = (s && s.tags) || {};
+  const lang = String(tags.language || '').trim();
+  if (RU_LANG.test(lang)) return true;
+  if (!UNKNOWN_LANG.test(lang)) return false;
+  const name = String(tags.title || '');
+  return (/\p{Script=Cyrillic}/u.test(name) && !UKR_LETTERS.test(name)) || /(?<![\p{L}])rus/iu.test(name);
+}
+
+// 'ru': a Russian audio stream; 'none': audio streams, all in known other
+// languages; 'unknown': no audio streams, or some without a language.
+export function audioFromFfprobe(ffprobe) {
+  const audio = (Array.isArray(ffprobe) ? ffprobe : []).filter((s) => s && s.codec_type === 'audio');
+  if (!audio.length) return 'unknown';
+  if (audio.some(streamIsRussian)) return 'ru';
+  return audio.every((s) => !UNKNOWN_LANG.test(String((s.tags && s.tags.language) || '').trim())) ? 'none' : 'unknown';
+}
+
+// ffprobe plus JacRed's `languages` (it also reads the tracker page: a dub
+// mislabelled "eng" inside the file still shows "rus" there).
+export function audioFromResult(result) {
+  const probe = audioFromFfprobe(result && result.ffprobe);
+  if (probe === 'ru') return 'ru';
+  const langs = Array.isArray(result && result.languages) ? result.languages.map(String) : [];
+  if (langs.some((l) => RU_LANG.test(l))) return 'ru';
+  if (probe === 'none' || langs.length) return 'none';
+  return 'unknown';
+}
+
+const cyrillic = (s) => /\p{Script=Cyrillic}/u.test(String(s || ''));
+
+// Russian audio of a release: from the title first (markers, external track,
+// raw), then the parser's metadata; for anime an unmarked release that names the
+// show in Russian is a maybe (voice 'unknown', penalized).
+// -> {russian, voice, studio, penalty, reason}
+export function classifyAudio(p, result, ctx) {
+  const anime = ctx.kind === 'anime';
+  const title = String((result && result.Title) || '');
+  const info = result && result.info;
+  const voices = info && Array.isArray(info.voices) ? info.voices.join(' ') : '';
+  const animeStudio = anime && (p.animeStudio || RE_ANIME_STUDIO.test(voices));
+  const out = (russian, voice, extra) => ({ russian, voice, studio: p.studio, penalty: 0, reason: null, ...extra });
+
+  if (p.raw && !(p.explicitVoice || animeStudio)) return out(false, null, { reason: 'raw' });
+  if (p.extAudio) return out(true, p.voice || 'other', { penalty: SCORING.extAudioPenalty });
+  if (p.russian || animeStudio) return out(true, p.voice || 'other');
+  const meta = audioFromResult(result);
+  if (meta === 'ru') {
+    const studio = detectStudio(voices);
+    return out(true, detectVoice('', studio, '') || 'other', { studio });
+  }
+  if (meta === 'none') return out(false, null, { reason: 'no-russian' });
+  const ruNames = (ctx.names || []).filter(cyrillic);
+  if (anime && !p.subsOnly && ruNames.some((n) => containsName(title, n))) {
+    return out(false, 'unknown', { penalty: SCORING.unknownVoicePenalty });
+  }
+  return out(false, null, { reason: 'no-russian' });
+}
+
 function rejectReason(p, result, ctx) {
+  if (!isRelevant(result.Title, ctx.names)) return 'unrelated';
   if (p.screener) return 'screener';
   if (p.dvOnly) return 'dv-only';
-  if (!p.russian) return 'no-russian';
+  if (p.audioReason) return p.audioReason;
   if (ctx.kind === 'movie' && Number(result.Size) > LIMITS.maxMovieBytes) return 'oversize';
   if ((ctx.kind === 'tv' || ctx.kind === 'anime') && !hasEpisode(p, ctx)) return 'episode-missing';
   return null;
@@ -183,14 +285,17 @@ function score(p, result, ctx) {
   let seeds = Math.min(W.seedsCap, Math.log2(seeders + 1) * W.seedsFactor);
   if (seeders < W.deadSeeders) seeds -= W.deadPenalty;
   const sizePenalty = ((Number(result.Size) || 0) / GiB) * W.sizePenaltyPerGiB;
-  return quality + voice + audio + seeds - sizePenalty;
+  return quality + voice + audio + seeds - sizePenalty - (p.audioPenalty || 0);
 }
 
 // Returns scored list (non-rejected first, each group by score desc) and the top non-rejected item.
+// ctx.names: the show's names; a release naming none of them is 'unrelated' (empty: no check).
 export function selectTorrent(results, ctx) {
   const scored = (results || []).map((result) => {
-    const p = parseTitle(result.Title);
-    return { result, score: score(p, result, ctx), rejected: rejectReason(p, result, ctx) };
+    const title = parseTitle(result.Title);
+    const a = classifyAudio(title, result, ctx);
+    const p = { ...title, russian: a.russian, voice: a.voice, studio: a.studio, audioPenalty: a.penalty, audioReason: a.reason };
+    return { result, score: score(p, result, ctx), rejected: rejectReason(p, result, ctx), voice: p.voice };
   });
   scored.sort((a, b) => (a.rejected ? 1 : 0) - (b.rejected ? 1 : 0) || b.score - a.score);
   const top = scored.find((s) => !s.rejected);

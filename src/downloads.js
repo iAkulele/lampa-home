@@ -8,7 +8,7 @@
 // when TorrServer is unreachable.
 import { lampa, store, storageField } from './lampa.js';
 import {
-  resolveTarget, searchTorrents, buildSearchParams, pickFile, fileInfos, titleHasSeason, startFromHash, isBusy,
+  resolveTarget, findReleases, pickFile, fileInfos, titleHasSeason, startFromHash, isBusy,
 } from './play.js';
 import { selectTorrent } from './torrent-select.js';
 import { toWideCard, applyPosterClass } from './cards.js';
@@ -349,9 +349,9 @@ export async function preload(card) {
     tsBase();
     const { movie, ctx } = await resolveTarget(card);
     if (job.cancelled) return;
-    const results = await searchTorrents(buildSearchParams(movie, ctx, storageField('parse_lang')));
+    const found = await findReleases(movie, ctx, job);
     if (job.cancelled) return;
-    const { chosen } = selectTorrent(results, ctx);
+    const { chosen } = selectTorrent(found.results, { ...ctx, names: found.names });
     if (!chosen) throw fail(MSG.none);
 
     L.Loading.setText(MSG.server);
