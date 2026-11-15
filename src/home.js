@@ -258,7 +258,6 @@ function component(object) {
             onFocus() {
               comp.lhOnBanner = false;
               if (comp.lhBanner) comp.lhBanner.follow(cardData);
-              L.Background.change(L.Utils.cardImgBackground(cardData));
             },
           });
         },

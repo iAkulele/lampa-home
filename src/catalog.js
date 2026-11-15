@@ -234,9 +234,6 @@ function component(object) {
           applyPosterClass(item.render(true), data);
         },
         onEnter: L.Router.call.bind(L.Router, 'full', data),
-        onFocus() {
-          L.Background.change(L.Utils.cardImgBackground(data));
-        },
       });
     },
     onDestroy() {

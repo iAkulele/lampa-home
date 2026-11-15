@@ -9,9 +9,15 @@
   font-size: 1.6em;
   font-weight: 700;
 }
+/* Focus animation: transform only, on the GPU. The frame (::after) has a fixed size, so no layout or paint work per key press. */
 .lh-home .card--wide,
 .lh-catalog .card--wide {
-  transition: transform 0.2s;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+body:not(.no--animation) .lh-home .card--wide,
+body:not(.no--animation) .lh-catalog .card--wide {
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .lh-home .card--wide.focus,
 .lh-catalog .card--wide.focus {
@@ -1544,10 +1550,7 @@
           onCreate() {
             applyPosterClass(item.render(true), data);
           },
-          onEnter: L.Router.call.bind(L.Router, "full", data),
-          onFocus() {
-            L.Background.change(L.Utils.cardImgBackground(data));
-          }
+          onEnter: L.Router.call.bind(L.Router, "full", data)
         });
       },
       onDestroy() {
@@ -1861,7 +1864,6 @@
               onFocus() {
                 comp.lhOnBanner = false;
                 if (comp.lhBanner) comp.lhBanner.follow(cardData);
-                L.Background.change(L.Utils.cardImgBackground(cardData));
               }
             });
           }
