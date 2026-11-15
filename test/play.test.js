@@ -249,12 +249,3 @@ test('test_candidate_loop_outcomes', async () => {
   assert.strictEqual(out, 'cancelled');
   assert.deepStrictEqual(tried, ['a']);
 });
-
-test('test_progress_after_outcome', async () => {
-  const { progressAfterOutcome } = await import('../src/play.js');
-  const prev = { season: 1, episode: 2 };
-  const picked = { season: 1, episode: 5 };
-  assert.strictEqual(progressAfterOutcome(prev, picked, 'played'), picked);
-  assert.strictEqual(progressAfterOutcome(prev, picked, 'nofile'), prev);
-  assert.strictEqual(progressAfterOutcome(null, picked, 'cancelled'), null);
-});

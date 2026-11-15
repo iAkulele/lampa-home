@@ -12,7 +12,7 @@ export {
   releaseLabel, genreIds, detectKind, normalizeTitles, titleHasSeason, trackerFields, withTracker, inferTracker,
   packNumbering, absoluteInPack, pickFile, previousEpisodeCtx,
 } from './play-pick.js';
-export { resumeTarget, advanceWatched, timelineHashString, progressAfterOutcome } from './play-progress.js';
+export { resumeTarget, advanceWatched, timelineHashString } from './play-progress.js';
 export { buildSearchParams, searchTorrents, findReleases, openNativeList } from './play-search.js';
 export { fileInfos } from './play-torrserver.js';
 export { resolveTarget, asksEpisode, chooseEpisode } from './play-target.js';

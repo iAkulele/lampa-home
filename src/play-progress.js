@@ -29,12 +29,6 @@ export function advanceWatched(target, seasons, isWatched) {
   return t;
 }
 
-// Progress the picker wrote early: kept only if playback started, else the previous value
-// comes back (null = nothing was stored). outcome: 'played' or anything else.
-export function progressAfterOutcome(prev, picked, outcome) {
-  return outcome === 'played' ? picked : prev;
-}
-
 // Lampa's timeline entry of one episode of the card.
 export function timelineOf(movie) {
   const L = lampa();

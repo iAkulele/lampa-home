@@ -8,7 +8,7 @@ import { detectKind, genreIds, normalizeTitles, titleHasSeason, releaseLabel, pi
 import { buildSearchParams, findReleases, openNativeList } from './play-search.js';
 import { addTorrent, pollFiles, fileInfos, buildPlaylist, dropUnlessPreloaded, FILES_TRIES } from './play-torrserver.js';
 import { resolveTarget, asksEpisode, chooseEpisode, withPoster } from './play-target.js';
-import { setPlaying, progressAfterOutcome } from './play-progress.js';
+import { setPlaying } from './play-progress.js';
 import { nextCandidates, tryCandidates } from './play-candidates.js';
 import { beginJob, isBusy } from './play-job.js';
 
@@ -179,7 +179,8 @@ export async function run(card) {
     openNativeList(params);
   } finally {
     if (rollback && !played) {
-      const prev = progressAfterOutcome(rollback.prev, null, 'failed');
+      // The previous value comes back (null: nothing was stored).
+      const { prev } = rollback;
       if (prev) store.progress.set(card.id, { season: prev.season, episode: prev.episode, hash: prev.hash });
       else store.progress.clear(card.id);
     }
