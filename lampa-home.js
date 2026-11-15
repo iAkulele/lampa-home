@@ -2505,6 +2505,10 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var DECADES = ["2000-2009", "1990-1999"];
   var KIND_TITLES2 = { movie: "\u0424\u0438\u043B\u044C\u043C\u044B", tv: "\u0421\u0435\u0440\u0438\u0430\u043B\u044B", cartoon: "\u041C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B", anime: "\u0410\u043D\u0438\u043C\u0435" };
   var SORT_TITLES = { new: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u043E\u0432\u044B\u0435", rating: "\u041F\u043E \u0440\u0435\u0439\u0442\u0438\u043D\u0433\u0443" };
+  var ORIGIN_TITLES = { null: "\u0432\u0441\u0435", ru: "\u0440\u0443\u0441\u0441\u043A\u0438\u0435" };
+  var RU_TITLES = { movie: "\u0420\u0443\u0441\u0441\u043A\u0438\u0435 \u0444\u0438\u043B\u044C\u043C\u044B", tv: "\u0420\u0443\u0441\u0441\u043A\u0438\u0435 \u0441\u0435\u0440\u0438\u0430\u043B\u044B", cartoon: "\u0420\u0443\u0441\u0441\u043A\u0438\u0435 \u043C\u0443\u043B\u044C\u0442\u0444\u0438\u043B\u044C\u043C\u044B" };
+  var hasOriginFilter = (kind) => kind in RU_TITLES;
+  var catalogTitle = (kind, lang) => lang === "ru" && RU_TITLES[kind] || KIND_TITLES2[kind];
   var FRESH = { genre: null, year: null, sort: "new", lang: null };
   var ROW_PRESETS = {
     movies: { kind: "movie", preset: FRESH },
@@ -2539,7 +2543,8 @@ body:not(.no--animation) .lh-catalog .card--wide {
     return {
       genre: `\u0416\u0430\u043D\u0440: ${genreName(kind, f.genre)}`,
       year: `\u0413\u043E\u0434: ${year}`,
-      sort: SORT_TITLES[f.sort] || SORT_TITLES.new
+      sort: SORT_TITLES[f.sort] || SORT_TITLES.new,
+      lang: `\u041F\u0440\u043E\u0438\u0441\u0445\u043E\u0436\u0434\u0435\u043D\u0438\u0435: ${ORIGIN_TITLES[f.lang === "ru" ? "ru" : null]}`
     };
   }
   function guarded(comp, fn) {
@@ -2597,7 +2602,9 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }
     function apply(patch) {
       store.filters.set(kind, { ...f, ...patch });
-      L.Activity.replace({ page: 1 });
+      const next = { page: 1 };
+      if ("lang" in patch) Object.assign(next, { lang: patch.lang, title: catalogTitle(kind, patch.lang) });
+      L.Activity.replace(next);
     }
     function pick(title, items, current2, onPick) {
       L.Select.show({
@@ -2612,7 +2619,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
       filter.set("filter", [
         { title: labels.genre, lh: "genre" },
         { title: labels.year, lh: "year" }
-      ]);
+      ].concat(hasOriginFilter(kind) ? [{ title: labels.lang, lh: "lang" }] : []));
       filter.set("sort", Object.keys(SORT_TITLES).map((key) => ({
         title: SORT_TITLES[key],
         lh: key,
@@ -2628,13 +2635,16 @@ body:not(.no--animation) .lh-catalog .card--wide {
             genresFor(kind).map((g) => ({ title: g.title, value: g.id }))
           );
           pick("\u0416\u0430\u043D\u0440", genres, f.genre, (genre) => apply({ genre }));
+        } else if (a.lh === "lang") {
+          pick("\u041F\u0440\u043E\u0438\u0441\u0445\u043E\u0436\u0434\u0435\u043D\u0438\u0435", [{ title: "\u0412\u0441\u0435", value: null }, { title: "\u0420\u0443\u0441\u0441\u043A\u0438\u0435", value: "ru" }], f.lang, (lang) => apply({ lang }));
         } else {
           pick("\u0413\u043E\u0434", yearOptions(todayIso()), f.year, (year) => apply({ year }));
         }
       };
       const line = filter.render();
       line.find(".filter--search").remove();
-      line.find(".filter--filter > div").text(`${labels.genre}, ${labels.year}`).removeClass("hide");
+      const chosen = [labels.genre, labels.year].concat(f.lang === "ru" ? ["\u0440\u0443\u0441\u0441\u043A\u0438\u0435"] : []);
+      line.find(".filter--filter > div").text(chosen.join(", ")).removeClass("hide");
       line.find(".filter--sort > div").text(labels.sort).removeClass("hide");
       line.find(".selector").on("hover:focus", (e) => {
         lastChip = e.target;
@@ -2708,7 +2718,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
   function open(kind, preset) {
     if (preset) store.filters.set(kind, applyPreset(store.filters.get(kind), preset));
     const lang = preset && preset.lang || null;
-    const title = lang === "ru" ? kind === "tv" ? "\u0420\u0443\u0441\u0441\u043A\u0438\u0435 \u0441\u0435\u0440\u0438\u0430\u043B\u044B" : "\u0420\u0443\u0441\u0441\u043A\u043E\u0435" : KIND_TITLES2[kind];
+    const title = catalogTitle(kind, lang);
     lampa().Activity.push({ url: "", component: NAME, kind, lang, title, page: 1, source: "tmdb" });
   }
   function openHistory() {
