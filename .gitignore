@@ -1,3 +1,4 @@
 node_modules/
 .superpowers/
 .lampa-source/
+.claude/worktrees/
