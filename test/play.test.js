@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import {
   detectKind, pickFile, buildSearchParams, advanceWatched, timelineHashString, resumeTarget, normalizeTitles, titleHasSeason,
+  nextCandidates, previousEpisodeCtx,
 } from '../src/play.js';
 
 const GiB = 1024 ** 3;
@@ -180,4 +181,27 @@ test('test_pick_file_rejects_bare_hit_from_other_season_folder', () => {
   // A season Lampa only guessed (no marker in the path) does not reject the hit.
   const guessed = [{ id: 1, season: 1, episode: 5, defaultSeason: true }, { id: 2, season: 1, episode: 4, defaultSeason: true }];
   assert.strictEqual(pickFile(files, ctx, guessed).id, 1);
+});
+
+test('test_next_candidates_skips_rejected_and_limits', () => {
+  const r = (n, link) => ({ Title: 'T' + n, MagnetUri: link || 'magnet:' + n });
+  const scored = [
+    { result: r(1), score: 90, rejected: null },
+    { result: r(2), score: 80, rejected: null },
+    { result: r(3, 'magnet:1'), score: 70, rejected: null }, // same release as #1
+    { result: r(4), score: 60, rejected: null },
+    { result: r(5), score: 50, rejected: null },
+    { result: r(6), score: 99, rejected: 'cam' },
+  ];
+  assert.deepStrictEqual(nextCandidates(scored).map((x) => x.Title), ['T1', 'T2', 'T4']);
+  assert.deepStrictEqual(nextCandidates(scored, 1).map((x) => x.Title), ['T1']);
+  assert.deepStrictEqual(nextCandidates([{ result: r(1), score: 1, rejected: 'x' }]), []);
+  assert.deepStrictEqual(nextCandidates(null), []);
+});
+
+test('test_previous_episode_ctx', () => {
+  assert.deepStrictEqual(previousEpisodeCtx({ kind: 'anime', season: 1, episode: 12, absolute: 12 }),
+    { kind: 'anime', season: 1, episode: 11, absolute: 11 });
+  assert.strictEqual(previousEpisodeCtx({ kind: 'tv', season: 1, episode: 1, absolute: 1 }), null);
+  assert.strictEqual(previousEpisodeCtx({ kind: 'movie' }), null);
 });

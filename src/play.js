@@ -13,7 +13,13 @@ const INDIVIDUAL = ['vob', 'm2ts'];
 const FILES_EVERY_MS = 2000;
 const WATCHED_PERCENT = 85;
 const FILES_TRIES = 45;
+// Extra candidates get a shorter wait for their file list (15 × 2 s).
+const FILES_TRIES_EXTRA = 15;
 const HASH_TIMEOUT_MS = 20000;
+// Releases «Играть» tries before giving up on the episode.
+const MAX_CANDIDATES = 3;
+// Whole «Играть» run (search + every candidate) never keeps the loader longer.
+const RUN_TIMEOUT_MS = 90000;
 
 const MSG = {
   search: 'Ищу раздачу…',
@@ -21,6 +27,9 @@ const MSG = {
   files: 'Жду список файлов…',
   none: 'Подходящей раздачи не нашёл, выберите вручную',
   noFile: 'Нужной серии в раздаче не нашёл, выберите вручную',
+  notYet: (n) => `Серия ${n} ещё не появилась в раздачах`,
+  retry: (i, n) => `Пробую другую раздачу (${i}/${n})…`,
+  timeout: 'Раздача не запустилась вовремя, выберите вручную',
   parser: 'Парсер не ответил',
   torrserver: 'TorrServer недоступен',
   noServer: 'TorrServer не настроен',
@@ -103,6 +112,30 @@ export function pickFile(files, ctx, infos) {
   if (ambiguous) return null;
   // A single-episode release: selectTorrent already matched the episode by title.
   return videos.length === 1 && parsed[0].ep.episode == null ? videos[0] : null;
+}
+
+// Releases to try, in selectTorrent's order (best score first; for tv/anime a
+// title range that provably holds the episode already scores higher): rejected
+// ones skipped, the same link only once, at most `max`.
+export function nextCandidates(scored, max = MAX_CANDIDATES) {
+  const out = [];
+  const seen = new Set();
+  for (const s of scored || []) {
+    if (out.length >= max) break;
+    if (!s || s.rejected || !s.result) continue;
+    const link = s.result.MagnetUri || s.result.Link || s.result.Title;
+    if (link && seen.has(link)) continue;
+    if (link) seen.add(link);
+    out.push(s.result);
+  }
+  return out;
+}
+
+// ctx of the episode before the target in the same season (null for a movie or
+// the first episode of a season): a pack holding it means the target is not out yet.
+export function previousEpisodeCtx(ctx) {
+  if (!ctx || ctx.kind === 'movie' || !(ctx.episode > 1)) return null;
+  return { ...ctx, episode: ctx.episode - 1, absolute: ctx.absolute > 1 ? ctx.absolute - 1 : ctx.absolute };
 }
 
 // Lampa's timeline entry of the stored episode: still unfinished -> play it again.
@@ -224,13 +257,13 @@ function addTorrent(result, movie) {
 }
 
 // Torserver.files() calls back only once file_stats exist; poll like Lampa does.
-function pollFiles(hash, job) {
+function pollFiles(hash, job, maxTries = FILES_TRIES) {
   const L = lampa();
   return new Promise((resolve, reject) => {
     let tries = 0;
     const tick = () => {
       if (job.cancelled) return stop(null);
-      if (++tries > FILES_TRIES) return stop(fail(MSG.noFiles));
+      if (++tries > maxTries) return stop(fail(MSG.noFiles));
       L.Torserver.files(hash, (json) => {
         if (json && json.file_stats) stop(null, json.file_stats);
       }, () => {});
@@ -376,10 +409,11 @@ export async function resolveTarget(card) {
 function beginJob(text, onCancel) {
   const L = lampa();
   if (current) return null;
-  const job = { cancelled: false, timer: null, hash: null };
+  const job = { cancelled: false, timer: null, hash: null, deadline: null };
   current = job;
   job.finish = () => {
     if (job.timer) clearInterval(job.timer);
+    if (job.deadline) clearTimeout(job.deadline);
     if (current === job) current = null;
     L.Loading.stop();
   };
@@ -393,16 +427,21 @@ function beginJob(text, onCancel) {
 
 // Waits for the torrent's files, picks the one to start (ctx.index wins when
 // known) and starts the player. Returns 'played', 'cancelled' or 'nofile'.
-async function playFiles(job, card, movie, ctx) {
+async function playFiles(job, card, movie, ctx, maxTries) {
   const L = lampa();
   L.Loading.setText(MSG.files);
-  const files = await pollFiles(job.hash, job);
+  const files = await pollFiles(job.hash, job, maxTries);
   if (job.cancelled || !files) return 'cancelled';
 
   const playlist = buildPlaylist(files, movie, job.hash);
-  const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, fileInfos(files, movie));
+  const infos = ctx.index != null ? null : fileInfos(files, movie);
+  const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, infos);
   const element = file && playlist.find((p) => p.id === file.id);
-  if (!element) return 'nofile';
+  if (!element) {
+    // The episode before the target is there: the target is just not released yet.
+    const prev = ctx.index != null ? null : previousEpisodeCtx(ctx);
+    return prev && pickFile(files, prev, infos) ? 'nofile-prev' : 'nofile';
+  }
 
   job.finish();
   // History keeps genre_ids only (Utils.clearCard): notify.js needs them for anime.
@@ -426,6 +465,16 @@ export async function run(card) {
 
   const kind = detectKind(card);
   let params = buildSearchParams(card, { kind }, storageField('parse_lang'));
+  // The parser timeout, TorrServer and several file polls must not add up to
+  // minutes: past RUN_TIMEOUT_MS the run stops and the native list opens.
+  job.deadline = setTimeout(() => {
+    if (current !== job || job.cancelled) return;
+    job.cancelled = true;
+    dropUnlessPreloaded(job.hash);
+    finish();
+    L.Noty.show(MSG.timeout);
+    openNativeList(params);
+  }, RUN_TIMEOUT_MS);
   try {
     const { movie, ctx } = await resolveTarget(card);
     if (job.cancelled) return;
@@ -433,24 +482,40 @@ export async function run(card) {
 
     const results = await searchTorrents(params);
     if (job.cancelled) return;
-    const { chosen } = selectTorrent(results, ctx);
-    if (!chosen) {
+    const candidates = nextCandidates(selectTorrent(results, ctx).scored);
+    if (!candidates.length) {
       finish();
       L.Noty.show(MSG.none);
       return openNativeList(params);
     }
 
     if (!L.Torserver.url()) throw fail(MSG.noServer);
-    L.Loading.setText(MSG.server);
-    job.hash = await addTorrent(chosen, movie);
-    if (job.cancelled) return dropUnlessPreloaded(job.hash);
-    const outcome = await playFiles(job, card, movie, { ...ctx, titleHasSeason: titleHasSeason(chosen.Title) });
-    if (outcome === 'nofile') {
+    // Ongoing shows: the best pack may stop one episode short, or the episode
+    // sits in another release. Try the next ones before giving up.
+    let prevSeen = false;
+    for (let i = 0; i < candidates.length; i++) {
+      const cand = candidates[i];
+      L.Loading.setText(i === 0 ? MSG.server : MSG.retry(i + 1, candidates.length));
+      let outcome;
+      try {
+        const hash = await addTorrent(cand, movie);
+        job.hash = hash;
+        if (job.cancelled) return dropUnlessPreloaded(hash);
+        outcome = await playFiles(job, card, movie, { ...ctx, titleHasSeason: titleHasSeason(cand.Title) },
+          i === 0 ? FILES_TRIES : FILES_TRIES_EXTRA);
+      } catch (err) {
+        // The first release's errors stop the run as before; a later one just did not work out.
+        if (i === 0 || job.cancelled || !(err instanceof PlayError)) throw err;
+        outcome = 'nofile';
+      }
+      if (outcome === 'played' || outcome === 'cancelled' || job.cancelled) return;
+      if (outcome === 'nofile-prev') prevSeen = true;
       dropUnlessPreloaded(job.hash);
-      finish();
-      L.Noty.show(MSG.noFile);
-      return openNativeList(params);
+      job.hash = null;
     }
+    finish();
+    L.Noty.show(prevSeen ? MSG.notYet(ctx.episode) : MSG.noFile);
+    return openNativeList(params);
   } catch (err) {
     if (job.cancelled) return;
     dropUnlessPreloaded(job.hash);
@@ -479,7 +544,7 @@ export async function startFromHash(hash, card, ctx, title) {
       movie = { ...movie, number_of_seasons: Math.max(1, (ctx && ctx.season) || 1) };
     }
     const outcome = await playFiles(job, card, movie, { kind, ...ctx, titleHasSeason: titleHasSeason(title) });
-    if (outcome === 'nofile') {
+    if (outcome === 'nofile' || outcome === 'nofile-prev') {
       job.finish();
       L.Noty.show(MSG.noFile);
     }

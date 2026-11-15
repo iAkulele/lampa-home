@@ -944,13 +944,19 @@ body:not(.no--animation) .lh-catalog .card--wide {
   var FILES_EVERY_MS = 2e3;
   var WATCHED_PERCENT = 85;
   var FILES_TRIES = 45;
+  var FILES_TRIES_EXTRA = 15;
   var HASH_TIMEOUT_MS = 2e4;
+  var MAX_CANDIDATES = 3;
+  var RUN_TIMEOUT_MS = 9e4;
   var MSG = {
     search: "\u0418\u0449\u0443 \u0440\u0430\u0437\u0434\u0430\u0447\u0443\u2026",
     server: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u0432 TorrServer\u2026",
     files: "\u0416\u0434\u0443 \u0441\u043F\u0438\u0441\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432\u2026",
     none: "\u041F\u043E\u0434\u0445\u043E\u0434\u044F\u0449\u0435\u0439 \u0440\u0430\u0437\u0434\u0430\u0447\u0438 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
     noFile: "\u041D\u0443\u0436\u043D\u043E\u0439 \u0441\u0435\u0440\u0438\u0438 \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0435 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
+    notYet: (n) => `\u0421\u0435\u0440\u0438\u044F ${n} \u0435\u0449\u0451 \u043D\u0435 \u043F\u043E\u044F\u0432\u0438\u043B\u0430\u0441\u044C \u0432 \u0440\u0430\u0437\u0434\u0430\u0447\u0430\u0445`,
+    retry: (i, n) => `\u041F\u0440\u043E\u0431\u0443\u044E \u0434\u0440\u0443\u0433\u0443\u044E \u0440\u0430\u0437\u0434\u0430\u0447\u0443 (${i}/${n})\u2026`,
+    timeout: "\u0420\u0430\u0437\u0434\u0430\u0447\u0430 \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u043B\u0430\u0441\u044C \u0432\u043E\u0432\u0440\u0435\u043C\u044F, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
     parser: "\u041F\u0430\u0440\u0441\u0435\u0440 \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B",
     torrserver: "TorrServer \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
     noServer: "TorrServer \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D",
@@ -1014,6 +1020,23 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }
     if (ambiguous) return null;
     return videos.length === 1 && parsed[0].ep.episode == null ? videos[0] : null;
+  }
+  function nextCandidates(scored, max = MAX_CANDIDATES) {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const s of scored || []) {
+      if (out.length >= max) break;
+      if (!s || s.rejected || !s.result) continue;
+      const link = s.result.MagnetUri || s.result.Link || s.result.Title;
+      if (link && seen.has(link)) continue;
+      if (link) seen.add(link);
+      out.push(s.result);
+    }
+    return out;
+  }
+  function previousEpisodeCtx(ctx) {
+    if (!ctx || ctx.kind === "movie" || !(ctx.episode > 1)) return null;
+    return { ...ctx, episode: ctx.episode - 1, absolute: ctx.absolute > 1 ? ctx.absolute - 1 : ctx.absolute };
   }
   function resumeTarget(progress, view) {
     if (!progress || !view) return null;
@@ -1112,13 +1135,13 @@ body:not(.no--animation) .lh-catalog .card--wide {
     });
     return withTimeout(req, HASH_TIMEOUT_MS, MSG.torrserver);
   }
-  function pollFiles(hash, job) {
+  function pollFiles(hash, job, maxTries = FILES_TRIES) {
     const L = lampa();
     return new Promise((resolve, reject) => {
       let tries = 0;
       const tick = () => {
         if (job.cancelled) return stop(null);
-        if (++tries > FILES_TRIES) return stop(fail(MSG.noFiles));
+        if (++tries > maxTries) return stop(fail(MSG.noFiles));
         L.Torserver.files(hash, (json) => {
           if (json && json.file_stats) stop(null, json.file_stats);
         }, () => {
@@ -1234,10 +1257,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
   function beginJob(text, onCancel) {
     const L = lampa();
     if (current) return null;
-    const job = { cancelled: false, timer: null, hash: null };
+    const job = { cancelled: false, timer: null, hash: null, deadline: null };
     current = job;
     job.finish = () => {
       if (job.timer) clearInterval(job.timer);
+      if (job.deadline) clearTimeout(job.deadline);
       if (current === job) current = null;
       L.Loading.stop();
     };
@@ -1248,15 +1272,19 @@ body:not(.no--animation) .lh-catalog .card--wide {
     }, text);
     return job;
   }
-  async function playFiles(job, card, movie, ctx) {
+  async function playFiles(job, card, movie, ctx, maxTries) {
     const L = lampa();
     L.Loading.setText(MSG.files);
-    const files = await pollFiles(job.hash, job);
+    const files = await pollFiles(job.hash, job, maxTries);
     if (job.cancelled || !files) return "cancelled";
     const playlist = buildPlaylist(files, movie, job.hash);
-    const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, fileInfos(files, movie));
+    const infos = ctx.index != null ? null : fileInfos(files, movie);
+    const file = ctx.index != null ? files.find((f) => f.id === ctx.index) : pickFile(files, ctx, infos);
     const element = file && playlist.find((p) => p.id === file.id);
-    if (!element) return "nofile";
+    if (!element) {
+      const prev = ctx.index != null ? null : previousEpisodeCtx(ctx);
+      return prev && pickFile(files, prev, infos) ? "nofile-prev" : "nofile";
+    }
     job.finish();
     if (movie.id) L.Favorite.add("history", { ...movie, genre_ids: genreIds(movie) }, 100);
     playingId = ctx.kind === "movie" ? null : card.id;
@@ -1276,29 +1304,55 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const finish = job.finish;
     const kind = detectKind(card);
     let params = buildSearchParams(card, { kind }, storageField("parse_lang"));
+    job.deadline = setTimeout(() => {
+      if (current !== job || job.cancelled) return;
+      job.cancelled = true;
+      dropUnlessPreloaded(job.hash);
+      finish();
+      L.Noty.show(MSG.timeout);
+      openNativeList(params);
+    }, RUN_TIMEOUT_MS);
     try {
       const { movie, ctx } = await resolveTarget(card);
       if (job.cancelled) return;
       params = buildSearchParams(movie, ctx, storageField("parse_lang"));
       const results = await searchTorrents(params);
       if (job.cancelled) return;
-      const { chosen } = selectTorrent(results, ctx);
-      if (!chosen) {
+      const candidates2 = nextCandidates(selectTorrent(results, ctx).scored);
+      if (!candidates2.length) {
         finish();
         L.Noty.show(MSG.none);
         return openNativeList(params);
       }
       if (!L.Torserver.url()) throw fail(MSG.noServer);
-      L.Loading.setText(MSG.server);
-      job.hash = await addTorrent(chosen, movie);
-      if (job.cancelled) return dropUnlessPreloaded(job.hash);
-      const outcome = await playFiles(job, card, movie, { ...ctx, titleHasSeason: titleHasSeason(chosen.Title) });
-      if (outcome === "nofile") {
+      let prevSeen = false;
+      for (let i = 0; i < candidates2.length; i++) {
+        const cand = candidates2[i];
+        L.Loading.setText(i === 0 ? MSG.server : MSG.retry(i + 1, candidates2.length));
+        let outcome;
+        try {
+          const hash = await addTorrent(cand, movie);
+          job.hash = hash;
+          if (job.cancelled) return dropUnlessPreloaded(hash);
+          outcome = await playFiles(
+            job,
+            card,
+            movie,
+            { ...ctx, titleHasSeason: titleHasSeason(cand.Title) },
+            i === 0 ? FILES_TRIES : FILES_TRIES_EXTRA
+          );
+        } catch (err) {
+          if (i === 0 || job.cancelled || !(err instanceof PlayError)) throw err;
+          outcome = "nofile";
+        }
+        if (outcome === "played" || outcome === "cancelled" || job.cancelled) return;
+        if (outcome === "nofile-prev") prevSeen = true;
         dropUnlessPreloaded(job.hash);
-        finish();
-        L.Noty.show(MSG.noFile);
-        return openNativeList(params);
+        job.hash = null;
       }
+      finish();
+      L.Noty.show(prevSeen ? MSG.notYet(ctx.episode) : MSG.noFile);
+      return openNativeList(params);
     } catch (err) {
       if (job.cancelled) return;
       dropUnlessPreloaded(job.hash);
@@ -1324,7 +1378,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
         movie = { ...movie, number_of_seasons: Math.max(1, ctx && ctx.season || 1) };
       }
       const outcome = await playFiles(job, card, movie, { kind, ...ctx, titleHasSeason: titleHasSeason(title) });
-      if (outcome === "nofile") {
+      if (outcome === "nofile" || outcome === "nofile-prev") {
         job.finish();
         L.Noty.show(MSG.noFile);
       }
