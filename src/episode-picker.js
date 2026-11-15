@@ -18,6 +18,14 @@ export function formatDate(iso) {
 
 const isAired = (ep, today) => ep.aired === true || (!!ep.air_date && (!today || ep.air_date <= today));
 
+// Lampa's TMDB source cuts long seasons into virtual chunks of ~24 episodes in
+// `episodes`; the whole TMDB season stays in `episodes_original`.
+export function seasonEpisodeList(json) {
+  if (!json) return null;
+  if (Array.isArray(json.episodes_original) && json.episodes_original.length) return json.episodes_original;
+  return Array.isArray(json.episodes) ? json.episodes : null;
+}
+
 // Episodes 1..count without names (TMDB season not loaded), aired by construction.
 export function fallbackEpisodes(season, count) {
   const out = [];
@@ -56,6 +64,9 @@ export function pickerItems({ season, target, episodes, watchedSet, inProgress, 
   const watched = watchedSet || new Set();
   const progress = inProgress || {};
   const items = [];
+  const other = seasonsCount > 1
+    ? { title: 'Другой сезон…', subtitle: `Сейчас: сезон ${season} · всего сезонов ${seasonsCount}`, season, episode: null, kind: 'season', selected: false }
+    : null;
   if (target && target.season === season) {
     const ep = aired.find((e) => e.episode_number === target.episode);
     items.push({
@@ -63,6 +74,7 @@ export function pickerItems({ season, target, episodes, watchedSet, inProgress, 
       season, episode: target.episode, kind: 'continue', selected: true,
     });
   }
+  if (other) items.push(other);
   for (const ep of aired) {
     const n = ep.episode_number;
     let prefix = '';
@@ -73,9 +85,14 @@ export function pickerItems({ season, target, episodes, watchedSet, inProgress, 
       season, episode: n, kind: 'episode', selected: false,
     });
   }
-  if (seasonsCount > 1) items.push({ title: 'Другой сезон…', subtitle: '', season, episode: null, kind: 'season', selected: false });
   items.push({ title: 'Все раздачи', subtitle: '', season, episode: null, kind: 'list', selected: false });
   return items;
+}
+
+function episodesWord(n) {
+  const m = n % 100, d = n % 10;
+  const w = m >= 11 && m <= 14 ? 'серий' : d === 1 ? 'серия' : d >= 2 && d <= 4 ? 'серии' : 'серий';
+  return `${n} ${w}`;
 }
 
 // Seasons that have started airing: [{title, subtitle, season, selected}].
@@ -86,10 +103,16 @@ export function seasonItems(tv, current, today) {
     .filter((s) => (s.air_date ? s.air_date <= today : !status || s.season_number <= status.season))
     .filter((s) => !status || s.season_number <= status.season)
     .sort((a, b) => a.season_number - b.season_number)
-    .map((s) => ({
-      title: `Сезон ${s.season_number}`, subtitle: formatDate(s.air_date),
-      season: s.season_number, selected: s.season_number === current,
-    }));
+    .map((s) => {
+      const live = !!status && status.airing && s.season_number === status.season;
+      const state = live ? `выходит, вышло ${status.aired} из ${status.total}` : 'вышел полностью';
+      const date = formatDate(s.air_date);
+      return {
+        title: `${s.season_number === current ? '✓ ' : ''}Сезон ${s.season_number} · ${episodesWord(s.episode_count)}`,
+        subtitle: date ? `${state} · с ${date}` : state,
+        season: s.season_number, selected: s.season_number === current,
+      };
+    });
 }
 
 // Episodes of a season known to have aired when TMDB's season list is missing.
@@ -117,7 +140,7 @@ function seasonEpisodes(tv, season, today) {
   });
   return req.then(
     (json) => {
-      const eps = (json && Array.isArray(json.episodes)) ? json.episodes : null;
+      const eps = seasonEpisodeList(json);
       if (!eps || !eps.length) return fallback();
       seasonCache.set(key, eps);
       return eps;

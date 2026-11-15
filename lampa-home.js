@@ -1085,6 +1085,11 @@ body:not(.no--animation) .lh-catalog .card--wide {
     return m ? `${m[3]}.${m[2]}.${m[1]}` : "";
   }
   var isAired = (ep, today) => ep.aired === true || !!ep.air_date && (!today || ep.air_date <= today);
+  function seasonEpisodeList(json) {
+    if (!json) return null;
+    if (Array.isArray(json.episodes_original) && json.episodes_original.length) return json.episodes_original;
+    return Array.isArray(json.episodes) ? json.episodes : null;
+  }
   function fallbackEpisodes(season, count) {
     const out = [];
     for (let n = 1; n <= count; n++) out.push({ episode_number: n, season_number: season, name: "", air_date: null, aired: true });
@@ -1113,6 +1118,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     const watched = watchedSet || /* @__PURE__ */ new Set();
     const progress = inProgress || {};
     const items = [];
+    const other = seasonsCount > 1 ? { title: "\u0414\u0440\u0443\u0433\u043E\u0439 \u0441\u0435\u0437\u043E\u043D\u2026", subtitle: `\u0421\u0435\u0439\u0447\u0430\u0441: \u0441\u0435\u0437\u043E\u043D ${season} \xB7 \u0432\u0441\u0435\u0433\u043E \u0441\u0435\u0437\u043E\u043D\u043E\u0432 ${seasonsCount}`, season, episode: null, kind: "season", selected: false } : null;
     if (target && target.season === season) {
       const ep = aired.find((e) => e.episode_number === target.episode);
       items.push({
@@ -1124,6 +1130,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
         selected: true
       });
     }
+    if (other) items.push(other);
     for (const ep of aired) {
       const n = ep.episode_number;
       let prefix = "";
@@ -1138,18 +1145,27 @@ body:not(.no--animation) .lh-catalog .card--wide {
         selected: false
       });
     }
-    if (seasonsCount > 1) items.push({ title: "\u0414\u0440\u0443\u0433\u043E\u0439 \u0441\u0435\u0437\u043E\u043D\u2026", subtitle: "", season, episode: null, kind: "season", selected: false });
     items.push({ title: "\u0412\u0441\u0435 \u0440\u0430\u0437\u0434\u0430\u0447\u0438", subtitle: "", season, episode: null, kind: "list", selected: false });
     return items;
   }
+  function episodesWord(n) {
+    const m = n % 100, d = n % 10;
+    const w = m >= 11 && m <= 14 ? "\u0441\u0435\u0440\u0438\u0439" : d === 1 ? "\u0441\u0435\u0440\u0438\u044F" : d >= 2 && d <= 4 ? "\u0441\u0435\u0440\u0438\u0438" : "\u0441\u0435\u0440\u0438\u0439";
+    return `${n} ${w}`;
+  }
   function seasonItems(tv, current2, today) {
     const status2 = tv ? episodeStatus(tv, today) : null;
-    return (tv && tv.seasons || []).filter((s) => s && s.season_number > 0 && s.episode_count > 0).filter((s) => s.air_date ? s.air_date <= today : !status2 || s.season_number <= status2.season).filter((s) => !status2 || s.season_number <= status2.season).sort((a, b) => a.season_number - b.season_number).map((s) => ({
-      title: `\u0421\u0435\u0437\u043E\u043D ${s.season_number}`,
-      subtitle: formatDate(s.air_date),
-      season: s.season_number,
-      selected: s.season_number === current2
-    }));
+    return (tv && tv.seasons || []).filter((s) => s && s.season_number > 0 && s.episode_count > 0).filter((s) => s.air_date ? s.air_date <= today : !status2 || s.season_number <= status2.season).filter((s) => !status2 || s.season_number <= status2.season).sort((a, b) => a.season_number - b.season_number).map((s) => {
+      const live = !!status2 && status2.airing && s.season_number === status2.season;
+      const state = live ? `\u0432\u044B\u0445\u043E\u0434\u0438\u0442, \u0432\u044B\u0448\u043B\u043E ${status2.aired} \u0438\u0437 ${status2.total}` : "\u0432\u044B\u0448\u0435\u043B \u043F\u043E\u043B\u043D\u043E\u0441\u0442\u044C\u044E";
+      const date = formatDate(s.air_date);
+      return {
+        title: `${s.season_number === current2 ? "\u2713 " : ""}\u0421\u0435\u0437\u043E\u043D ${s.season_number} \xB7 ${episodesWord(s.episode_count)}`,
+        subtitle: date ? `${state} \xB7 \u0441 ${date}` : state,
+        season: s.season_number,
+        selected: s.season_number === current2
+      };
+    });
   }
   function airedCount(tv, season, today) {
     const s = (tv && tv.seasons || []).find((x) => x && x.season_number === season);
@@ -1170,7 +1186,7 @@ body:not(.no--animation) .lh-catalog .card--wide {
     });
     return req.then(
       (json) => {
-        const eps = json && Array.isArray(json.episodes) ? json.episodes : null;
+        const eps = seasonEpisodeList(json);
         if (!eps || !eps.length) return fallback();
         seasonCache.set(key, eps);
         return eps;
