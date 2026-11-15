@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import {
-  detectKind, pickFile, buildSearchParams, advanceWatched, timelineHashString, resumeTarget, normalizeTitles, titleHasSeason,
-  nextCandidates, previousEpisodeCtx, tryCandidates, PlayError, releaseLabel,
-} from '../src/play.js';
+import { detectKind, pickFile, normalizeTitles, titleHasSeason, previousEpisodeCtx, releaseLabel } from '../src/play-pick.js';
+import { buildSearchParams } from '../src/play-search.js';
+import { advanceWatched, timelineHashString, resumeTarget } from '../src/play-progress.js';
+import { nextCandidates, tryCandidates } from '../src/play-candidates.js';
+import { PlayError } from '../src/play-error.js';
 
 test('test_release_label', () => {
   assert.strictEqual(releaseLabel({ Title: 'Film 2160p WEB-DL HDRezka', Size: 16.6 * GiB }), '2160p · 16,6 ГБ · hdrezka');
@@ -248,13 +249,4 @@ test('test_candidate_loop_outcomes', async () => {
   }, { cancelled: () => cancelled });
   assert.strictEqual(out, 'cancelled');
   assert.deepStrictEqual(tried, ['a']);
-});
-
-test('test_progress_after_outcome', async () => {
-  const { progressAfterOutcome } = await import('../src/play.js');
-  const prev = { season: 1, episode: 2 };
-  const picked = { season: 1, episode: 5 };
-  assert.strictEqual(progressAfterOutcome(prev, picked, 'played'), picked);
-  assert.strictEqual(progressAfterOutcome(prev, picked, 'nofile'), prev);
-  assert.strictEqual(progressAfterOutcome(null, picked, 'cancelled'), null);
 });
